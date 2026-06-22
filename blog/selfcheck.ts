@@ -2,6 +2,9 @@
 // Boots the app on a random port, runs all endpoint tests, exits non-zero on failure.
 
 import { createAdaptorServer } from '@hono/node-server'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { app, docs } from './setup.js'
 
 // Import route files for side-effect registration
@@ -188,6 +191,22 @@ try {
   const r12 = await fetch(`${base}/docs`)
   assert(r12.status === 200, 'docs status')
 
+  // 20. OpenAPI spec snapshot — catches spec regressions.
+  // To update: rm blog/spec.snapshot.json && nub blog/selfcheck.ts
+  const here = dirname(fileURLToPath(import.meta.url))
+  const snapshotPath = join(here, 'spec.snapshot.json')
+  const actual = JSON.stringify(spec, null, 2) + '\n'
+  if (!existsSync(snapshotPath)) {
+    writeFileSync(snapshotPath, actual)
+    console.log(`  ℹ spec.snapshot.json created — review and commit`)
+  } else {
+    const expected = readFileSync(snapshotPath, 'utf8')
+    if (actual !== expected) {
+      writeFileSync(join(here, 'spec.actual.json'), actual)
+      failures.push('spec snapshot mismatch — review spec.actual.json, update snapshot if intentional')
+    }
+  }
+
 } finally {
   server.close()
 }
@@ -197,5 +216,5 @@ if (failures.length > 0) {
   for (const f of failures) console.error(`  ✗ ${f}`)
   process.exit(failures.length)
 } else {
-  console.log(`All 40 blog self-checks passed ✓`) // ponytail: count stays 40 — the default assertion is part of the spec check
+  console.log(`All 41 blog self-checks passed ✓`) // ponytail: count stays 41 — the default assertion is part of the spec check
 }

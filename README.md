@@ -1,6 +1,6 @@
 # encore-hono
 
-A thin Encore-style API DSL on top of [Hono](https://hono.dev) + [@hono/zod-openapi](https://github.com/honojs/middleware/tree/main/packages/zod-openapi).
+A function-based API DSL on top of [Hono](https://hono.dev) + [ArkType](https://arktype.io).
 
 Write a function, get a typed REST endpoint with auto-generated OpenAPI docs, request validation, and auth middleware — all in a few lines of code.
 
@@ -27,7 +27,7 @@ Open `http://localhost:3000/docs` for the Scalar API reference UI.
 
 ```ts
 import { createApi, APIError } from './lib/api.js'
-import { z } from 'zod'
+import { type } from 'arktype'
 
 const { api, auth, docs, app } = createApi({ title: 'My API', version: '1.0.0' })
 
@@ -39,18 +39,18 @@ auth('required', async (c, next) => {
   await next()
 })
 
-// GET /hello/:name — path params, Encore-style
+// GET /hello/:name — path params flat at top level
 api(
   { method: 'GET', path: '/hello/:name', auth: 'required' },
   async ({ name }) => ({ message: `Hello ${name}!` }),
 )
 
-// POST /things — body validation via zod, typed response
+// POST /things — body validation via ArkType, typed response
 api(
   {
     method: 'POST', path: '/things',
-    body: z.object({ name: z.string().min(1), count: z.number().int().positive() }),
-    responses: { 201: z.object({ id: z.string() }) },
+    body: type({ name: 'string >= 1', count: 'number.integer > 0' }),
+    responses: { 201: type({ id: 'string' }) },
     auth: 'required',
   },
   async ({ body }) => {
@@ -63,7 +63,7 @@ api(
 api(
   {
     method: 'GET', path: '/search',
-    query: z.object({ q: z.string(), limit: z.coerce.number().int().optional().default(10) }),
+    query: type({ q: 'string', limit: '1 <= number.integer <= 100 = 10' }),
     auth: 'required',
   },
   async ({ query }) => ({ results: [...Array(query.limit)], total: query.limit }),
@@ -79,7 +79,7 @@ Run with `nub index.ts`.
 ## How it works
 
 - **`createApi({ title, version })`** — returns `{ api, auth, docs, app }`
-- **`api(config, handler)`** — registers a Hono route with OpenAPI metadata. The handler receives a flat request object with types inferred from the zod schemas in `config`. Path params (`:name`) are parsed automatically and appear as top-level keys. Config fields:
+- **`api(config, handler)`** — registers a Hono route with OpenAPI metadata. The handler receives a flat request object with types inferred from the ArkType schemas in `config`. Path params (`:name`) are parsed automatically and appear as top-level keys. Config fields:
   - `tags?: string[]` — OpenAPI tags for grouping in docs
   - `summary?: string` — operation title in docs
   - `description?: string` — operation description
@@ -93,7 +93,7 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
 ## Features
 
 - Path params auto-typed from `:name` syntax — no `c.req.param('name')` digging
-- Body/query/header validation via zod — schemas double as OpenAPI input documentation
+- Body/query/header validation via ArkType — schemas double as OpenAPI input documentation
 - Response schemas feed into OpenAPI output documentation
 - Auth middleware — named, reusable, applied per-endpoint, with OpenAPI security schemes
 - OpenAPI tags, summary, description for doc grouping
@@ -107,7 +107,8 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
 ## Project structure
 
 ```
-lib/api.ts      — the library (~260 lines)
+lib/openapi.ts  — OpenAPIHono class, createRoute, arktypeValidator, spec emission
+lib/api.ts      — createApi, api, auth, docs, APIError
 example/
   routes.ts     — route definitions (single-file)
   index.ts      — server entry point
@@ -146,6 +147,3 @@ Run with:
 nub blog/index.ts
 ```
 
-## Relationship to Encore
-
-This is a thin (~200 line) wrapper on `@hono/zod-openapi` that mimics Encore's function-based API declaration style. It doesn't try to replicate Encore's infrastructure-as-code features (databases, Pub/Sub, secrets, etc.) — it stays at the HTTP routing + docs layer, which is the part that makes Encore feel immediately productive.

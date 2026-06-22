@@ -1,12 +1,13 @@
 /**
  * Self-check for lib/openapi.ts spike.
- * Three assertions:
+ * Four assertions:
  *   1. /openapi.json emits minimum/maximum in spec
  *   2. Query param coercion works (string "5" → number 5)
  *   3. Bad body returns 400 with error summary
+ *   4. Recursive schema: $defs hoisted to components, $ref pointers rewritten
  */
 
-import { type } from "arktype";
+import { scope, type } from "arktype";
 import { createRoute, OpenAPIHono } from "./openapi.js";
 
 const app = new OpenAPIHono();
@@ -47,6 +48,22 @@ app.openapi(
 		const q = query as { q: string; limit: number };
 		return { q: q.q, limit: q.limit };
 	},
+);
+
+// ── GET /tree — recursive schema ($defs + $ref) ───────────────────
+// ArkType's toJsonSchema() emits $defs and $ref pointers for recursive types.
+// The library must hoist $defs to components/schemas and rewrite all refs.
+const $tree = scope({ Tree: { label: "string", children: "Tree[]" } });
+const Tree = $tree.export().Tree;
+
+app.openapi(
+	createRoute({
+		method: "GET",
+		path: "/tree",
+		summary: "Get a tree",
+		responses: { 200: Tree },
+	}),
+	async () => ({ label: "root", children: [] }),
 );
 
 // ── OpenAPI docs ──────────────────────────────────────────────────
@@ -132,6 +149,39 @@ async function assertValidation() {
 		throw new Error(`error must be a non-empty string`);
 }
 
+// ── Assertion 4: Recursive schema $ref rewriting ──────────────────
+async function assertRefRewriting() {
+	const res = await app.request("/openapi.json");
+	if (res.status !== 200) throw new Error(`spec endpoint returned ${res.status}`);
+	const spec: any = await res.json();
+	const specStr = JSON.stringify(spec);
+
+	// No $defs key should remain anywhere in the spec
+	if (specStr.includes('"$defs"'))
+		throw new Error("spec still contains $defs key");
+
+	// No $ref should point to #/$defs/ (all should be rewritten)
+	if (specStr.includes('#/$defs/'))
+		throw new Error("spec still contains #/$defs/ refs");
+
+	// All $ref values must point to #/components/schemas/
+	const refMatches = specStr.match(/"\$ref":"([^"]+)"/g) ?? [];
+	for (const refMatch of refMatches) {
+		const refValue = refMatch.match(/"\$ref":"([^"]+)"/)![1]!;
+		if (!refValue.startsWith("#/components/schemas/"))
+			throw new Error(`ref ${refValue} does not point to #/components/schemas/`);
+	}
+
+	// Component schema names must use stable hash format (schema_<12hex>)
+	const schemaKeys = Object.keys(spec.components?.schemas ?? {});
+	if (schemaKeys.length === 0)
+		throw new Error("no schemas in components.schemas");
+	for (const key of schemaKeys) {
+		if (!/^schema_[a-f0-9]{12}$/.test(key))
+			throw new Error(`schema name "${key}" does not match schema_<12hex> format`);
+	}
+}
+
 // ── Run ───────────────────────────────────────────────────────────
 console.log("=== OpenAPIHono spike self-check ===");
 console.log();
@@ -139,8 +189,9 @@ console.log();
 await check("OpenAPI spec has minimum/maximum", assertSpec);
 await check("Query coercion string→number", assertCoercion);
 await check("Validation error returns 400", assertValidation);
+await check("Recursive schema $ref rewriting", assertRefRewriting);
 
 console.log();
-console.log(`Result: ${passed}/3 passed, ${failed} failed`);
+console.log(`Result: ${passed}/4 passed, ${failed} failed`);
 
 if (failed > 0) process.exit(1);

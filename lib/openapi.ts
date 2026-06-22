@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import type { Schema } from "hono/types";
 import type { ContentfulStatusCode, StatusCode } from "hono/utils/http-status";
 import { validator } from "hono/validator";
+import { createHash } from "node:crypto";
 
 // --- Types ---
 
@@ -194,6 +195,29 @@ export function arktypeValidator(
 		}
 		return result;
 	});
+}
+
+/**
+ * Recursively rewrite all $ref: "#/$defs/X" → "#/components/schemas/<stableName>" in-place.
+ * Used during _schemaToOA to fix dangling refs after hoisting $defs to components.
+ */
+function rewriteRefs(node: unknown, rename: Map<string, string>): void {
+  if (typeof node !== "object" || node === null) return;
+  if (Array.isArray(node)) {
+    for (const item of node) rewriteRefs(item, rename);
+    return;
+  }
+  const obj = node as Record<string, unknown>;
+  const ref = obj.$ref;
+  if (typeof ref === "string") {
+    const m = ref.match(/^#\/\$defs\/(.+)$/);
+    if (m && rename.has(m[1]!)) {
+      obj.$ref = `#/components/schemas/${rename.get(m[1]!)}`;
+    }
+  }
+  for (const key of Object.keys(obj)) {
+    rewriteRefs(obj[key], rename);
+  }
 }
 
 // --- OpenAPIHono ---
@@ -422,24 +446,50 @@ export class OpenAPIHono<
 
 	/**
 	 * Convert an ArkType schema → OpenAPI Schema Object.
-	 * Uses ArkType's toJsonSchema(), strips $schema, hoists $defs to components.
+	 * Uses ArkType's toJsonSchema(), strips $schema, hoists $defs to components/schemas
+	 * with content-hash stable names, and rewrites all $ref pointers accordingly.
 	 */
 	private _schemaToOA(schema: ArkType): JsonSchema {
 		const json = schema.toJsonSchema();
 		// Remove JSON Schema draft meta-schema (not valid in OpenAPI 3.0)
 		delete json.$schema;
 
-		// Hoist $defs to components/schemas (registered inline)
-		if (json.$defs) {
-			for (const [name, def] of Object.entries(json.$defs)) {
-				if (!this._components.schemas.has(name)) {
-					this._components.schemas.set(name, def);
-				}
-			}
-			delete json.$defs;
+		if (!json.$defs) return json;
+
+		// Build stable names: originalName → schema_<sha1(normalizedContent).slice(0,12)>
+		// ArkType's auto-generated def names (e.g. "intersection216") are counter-based
+		// and unstable across runs. Since those names also appear inside $ref strings
+		// in the def content, we normalize refs to positional indices before hashing
+		// so the hash depends only on structure, not generated names.
+		const defEntries = Object.entries(json.$defs);
+		const nameToIndex = new Map<string, string>();
+		for (let i = 0; i < defEntries.length; i++) {
+			nameToIndex.set(defEntries[i]![0], String(i));
+		}
+		const normalizeRefs = (s: string): string =>
+			s.replace(/#\/\$defs\/([^"]+)/g, (_, name) => `#/$defs/${nameToIndex.get(name) ?? name}`);
+
+		const rename = new Map<string, string>();
+		for (const [name, def] of defEntries) {
+			const hash = createHash("sha1")
+				.update(normalizeRefs(JSON.stringify(def)))
+				.digest("hex")
+				.slice(0, 12);
+			rename.set(name, `schema_${hash}`);
 		}
 
-		// ponytail: $defs are emitted inline for now; $ref rewriting is a follow-up
+		// Rewrite all $ref pointers in-place (main body + nested defs)
+		rewriteRefs(json, rename);
+
+		// Hoist $defs to components/schemas under stable names
+		for (const [name, def] of Object.entries(json.$defs)) {
+			const stableName = rename.get(name)!;
+			if (!this._components.schemas.has(stableName)) {
+				this._components.schemas.set(stableName, def);
+			}
+		}
+		delete json.$defs;
+
 		return json;
 	}
 
@@ -449,7 +499,8 @@ export class OpenAPIHono<
 		schema: ArkType,
 		inLocation: "path" | "query" | "header",
 	): void {
-		const json = schema.toJsonSchema();
+		// Use _schemaToOA (not raw toJsonSchema) so $defs are hoisted and refs rewritten
+		const json = this._schemaToOA(schema);
 		if (!isObjectSchema(json) || !json.properties) return;
 
 		const required = new Set<string>(json.required ?? []);

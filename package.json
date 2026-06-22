@@ -8,6 +8,8 @@
     "check": "nub example/selfcheck.ts",
     "blog": "nub blog/index.ts",
     "blog:check": "nub blog/selfcheck.ts",
+    "lib:check": "nub lib/openapi.selfcheck.ts",
+    "check:all": "nub lib/openapi.selfcheck.ts && nub example/selfcheck.ts && nub blog/selfcheck.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
