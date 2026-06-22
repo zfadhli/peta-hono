@@ -288,6 +288,10 @@ export class OpenAPIHono<
 			if (config.request?.query) req.query = creq.valid("query");
 			if (config.request?.headers) req.headers = creq.valid("header");
 
+			// Inject auth context set by auth middleware via c.set('auth', ctx)
+			const authCtx = (c as unknown as { get(key: string): unknown }).get("auth");
+			if (authCtx !== undefined) req.auth = authCtx;
+
 			const result = await handler(req);
 
 			// Determine status: explicit status, first 2xx/3xx in declared responses, or 200

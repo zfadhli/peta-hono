@@ -1,21 +1,20 @@
 // Shared API builder singleton — every route file imports `api` and `auth` from here.
 // ESM modules are singletons, so all routes register on the same `app` instance.
 
-import { createApi } from '../lib/api.js'
+import { createApi, fail } from '../lib/api.js'
 
-const { api, auth, docs, app } = createApi({
+const { api, auth, docs, app } = createApi<{ user: { id: string } }>({
   title: 'Blog API',
   version: '1.0.0',
 })
 
 // Auth middleware: required for write operations, skip for reads.
+// Return-based: throw to reject, return value becomes req.auth in handlers.
 // The third argument registers a Bearer auth security scheme in OpenAPI docs.
-auth('required', async (c, next) => {
+auth('required', async (c) => {
   const token = c.req.header('Authorization')
-  if (!token?.startsWith('Bearer ')) {
-    return c.json({ error: 'unauthorized' }, 401)
-  }
-  await next()
+  if (!token?.startsWith('Bearer ')) throw fail.unauthorized()
+  return { user: { id: 'alice' } }
 }, { type: 'http', scheme: 'bearer' })
 
 export { api, auth, docs, app }

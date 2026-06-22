@@ -61,9 +61,8 @@ api(
     responses: { 201: postSchema },
     auth: 'required',
   },
-  async ({ body }) => {
-    // ponytail: hardcoded authorId — in a real app this comes from the auth context
-    return createPost(body.title, body.content, 'alice')
+  async ({ body, auth }) => {
+    return createPost(body.title, body.content, auth.user.id)
   },
 )
 
@@ -82,9 +81,11 @@ api(
     responses: { 200: postSchema },
     auth: 'required',
   },
-  async ({ id, body }) => {
+  async ({ id, body, auth }) => {
+    const existing = getPost(id)
+    if (!existing) throw fail.notFound('post not found')
+    if (existing.authorId !== auth.user.id) throw fail.forbidden()
     const updated = updatePost(id, body)
-    if (!updated) throw fail.notFound('post not found')
     return updated
   },
 )
@@ -100,8 +101,11 @@ api(
     status: 204,
     auth: 'required',
   },
-  async ({ id }) => {
-    if (!deletePost(id)) throw fail.notFound('post not found')
+  async ({ id, auth }) => {
+    const existing = getPost(id)
+    if (!existing) throw fail.notFound('post not found')
+    if (existing.authorId !== auth.user.id) throw fail.forbidden()
+    deletePost(id)
     return null
   },
 )

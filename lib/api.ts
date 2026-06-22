@@ -1,6 +1,6 @@
 import { apiReference } from "@scalar/hono-api-reference";
 import { type Type, type } from "arktype";
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { type AuthScheme, createRoute, OpenAPIHono } from "./openapi.js";
 
@@ -59,28 +59,47 @@ type ReqFor<P extends string, B, Q, H> = ParamsFromPath<P> &
 	(Q extends AnyArkType ? { query: Record<string, any> } : {}) &
 	(H extends AnyArkType ? { headers: Record<string, any> } : {});
 
+/** Add `auth: Auth` to req only when Auth is not undefined (no-auth app). */
+type AuthField<Auth> = [Auth] extends [undefined] ? {} : { auth: Auth };
+
+/** Shared config fields for api() overloads — minus the `auth` key. */
+type RouteFields<P extends string, B, Q, H> = {
+	method: string;
+	path: P;
+	body?: B;
+	query?: Q;
+	headers?: H;
+	responses?: Record<number, AnyArkType>;
+	middleware?: MiddlewareHandler[];
+	tags?: string[];
+	summary?: string;
+	description?: string;
+	status?: number;
+};
+
 // --- Create the API builder ---
 
 /**
  * Create an Encore-style API builder on top of Hono + OpenAPI.
  *
  * ```ts
- * const { api, auth, docs, app } = createApi({ title: 'My API' })
+ * const { api, auth, docs, app } = createApi<{ user: { id: string } }>({ title: 'My API' })
  *
- * auth('required', async (c, next) => {
- *   if (!c.req.header('Authorization')) return c.json({ error: 'unauthorized' }, 401)
- *   await next()
+ * auth('required', async (c) => {
+ *   const token = c.req.header('Authorization')
+ *   if (!token?.startsWith('Bearer ')) throw fail.unauthorized()
+ *   return { user: { id: 'alice' } }   // returned value becomes req.auth
  * })
  *
  * const hello = api(
  *   { method: 'GET', path: '/hello/:name', auth: 'required' },
- *   async ({ name }) => ({ message: `Hello ${name}!` }),
+ *   async ({ name, auth }) => ({ message: `Hello ${name}! (${auth.user.id})` }),
  * )
  *
  * docs()
  * ```
  */
-export function createApi(opts: { title?: string; version?: string } = {}) {
+export function createApi<Auth = undefined>(opts: { title?: string; version?: string } = {}) {
 	const app = new OpenAPIHono();
 
 	// Global error handler — prevents leaking internal error details to clients
@@ -97,13 +116,42 @@ export function createApi(opts: { title?: string; version?: string } = {}) {
 	const auths = new Map<string, MiddlewareHandler>();
 	const authSchemes = new Map<string, AuthScheme>();
 
-	function auth(name: string, mw: MiddlewareHandler, scheme?: AuthScheme) {
-		auths.set(name, mw);
+	function auth(name: string, mw: (c: Context) => Promise<Auth> | Auth, scheme?: AuthScheme) {
+		// Wrap the return-based auth fn into a Hono middleware that stores the
+		// auth context on c for the handler wrapper to read via c.get('auth').
+		const wrapped: MiddlewareHandler = async (c, next) => {
+			const ctx = await mw(c);
+			(c as unknown as { set(key: string, value: unknown): void }).set("auth", ctx);
+			await next();
+		};
+		auths.set(name, wrapped);
 		if (scheme) {
 			authSchemes.set(name, scheme);
 			app.openAPIRegistry.registerComponent("securitySchemes", name, scheme);
 		}
 	}
+
+	// Overload 1: no auth → req has no `auth` field
+	function api<
+		P extends string,
+		B extends AnyArkType | undefined,
+		Q extends AnyArkType | undefined,
+		H extends AnyArkType | undefined,
+	>(
+		config: RouteFields<P, B, Q, H> & { auth?: undefined },
+		handler: (req: ReqFor<P, B, Q, H>) => Promise<any> | any,
+	): void;
+
+	// Overload 2: with auth → req gets `auth: Auth` (typed via createApi<Auth>)
+	function api<
+		P extends string,
+		B extends AnyArkType | undefined,
+		Q extends AnyArkType | undefined,
+		H extends AnyArkType | undefined,
+	>(
+		config: RouteFields<P, B, Q, H> & { auth: string },
+		handler: (req: ReqFor<P, B, Q, H> & AuthField<Auth>) => Promise<any> | any,
+	): void;
 
 	function api<
 		P extends string,
@@ -111,21 +159,8 @@ export function createApi(opts: { title?: string; version?: string } = {}) {
 		Q extends AnyArkType | undefined,
 		H extends AnyArkType | undefined,
 	>(
-		config: {
-			method: string;
-			path: P;
-			body?: B;
-			query?: Q;
-			headers?: H;
-			responses?: Record<number, AnyArkType>;
-			auth?: string;
-			middleware?: MiddlewareHandler[];
-			tags?: string[];
-			summary?: string;
-			description?: string;
-			status?: number;
-		},
-		handler: (req: ReqFor<P, B, Q, H>) => Promise<any> | any,
+		config: RouteFields<P, B, Q, H> & { auth?: string },
+		handler: (req: ReqFor<P, B, Q, H> & { auth: Auth }) => Promise<any> | any,
 	) {
 		// Normalize method to lowercase (accept 'GET' or 'get')
 		const raw = config.method.toLowerCase();
@@ -203,7 +238,7 @@ export function createApi(opts: { title?: string; version?: string } = {}) {
 		//   { name: 'world', body: {...}, query: {...}, headers: {...} }
 		// app.openapi() handles c.json() wrapping, null→204, and the global
 		// onError handler catches APIError instances.
-		app.openapi(route, (req) => handler(req as ReqFor<P, B, Q, H>));
+		app.openapi(route, (req) => handler(req as ReqFor<P, B, Q, H> & { auth: Auth }));
 	}
 
 	function docs(specPath = "/openapi.json", uiPath = "/docs") {

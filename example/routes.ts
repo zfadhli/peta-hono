@@ -1,20 +1,19 @@
 import { createApi, fail } from '../lib/api.js'
 import { type } from 'arktype'
 
-const { api, auth, docs, app } = createApi({
+const { api, auth, docs, app } = createApi<{ user: { id: string } }>({
   title: 'Encore-style Hono API',
   version: '1.0.0',
 })
 
 // --- Auth middleware --------------------------------------------------------
+// Return-based: throw to reject, return value becomes req.auth in handlers.
 // The third argument registers a Bearer auth security scheme in OpenAPI docs.
 
-auth('required', async (c, next) => {
+auth('required', async (c) => {
   const token = c.req.header('Authorization')
-  if (!token?.startsWith('Bearer ')) {
-    return c.json({ error: 'unauthorized' }, 401)
-  }
-  await next()
+  if (!token?.startsWith('Bearer ')) throw fail.unauthorized()
+  return { user: { id: 'alice' } }
 }, { type: 'http', scheme: 'bearer' })
 
 // --- 1. GET /hello/:name — path params (Encore-style) ----------------------
@@ -38,14 +37,14 @@ api(
       name: 'string >= 1',
       count: 'number.integer > 0',
     }),
-    responses: { 201: type({ id: 'string' }) },
+    responses: { 201: type({ id: 'string', userId: 'string' }) },
     auth: 'required',
   },
-  async ({ body }) => {
+  async ({ body, auth }) => {
     if (body.count > 100) {
       throw fail.badRequest('count too high')
     }
-    return { id: crypto.randomUUID() }
+    return { id: crypto.randomUUID(), userId: auth.user.id }
   },
 )
 

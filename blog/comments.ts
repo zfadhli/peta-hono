@@ -39,8 +39,8 @@ api(
     responses: { 201: commentSchema },
     auth: 'required',
   },
-  async ({ postId, body }) => {
-    const comment = createComment(postId, body.content, 'bob')
+  async ({ postId, body, auth }) => {
+    const comment = createComment(postId, body.content, auth.user.id)
     if (!comment) throw fail.notFound('post not found')
     return comment
   },

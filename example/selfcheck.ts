@@ -32,7 +32,7 @@ try {
   const r2 = await fetch(`${baseUrl}/hello/world`)
   const j2: any = await r2.json()
   assert(r2.status === 401, 'hello no auth status')
-  assert(j2.error === 'unauthorized', 'hello no auth body')
+  assert(j2.error === 'Unauthorized', 'hello no auth body')
 
   // 3. Create thing — happy path
   const r3 = await fetch(`${baseUrl}/things`, {
@@ -43,6 +43,7 @@ try {
   const j3: any = await r3.json()
   assert(r3.status === 201, 'things status')
   assert(typeof j3.id === 'string', 'things id type')
+  assert(j3.userId === 'alice', 'things userId from auth')
 
   // 4. Create thing — count too high
   const r4 = await fetch(`${baseUrl}/things`, {
