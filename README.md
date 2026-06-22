@@ -104,18 +104,6 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
 - Built on Hono — runs anywhere Hono runs (Node, Bun, Deno, Cloudflare Workers)
 - **Zero-config TypeScript** via [Nub](https://nubjs.com) — `nub file.ts` runs it directly
 
-## Type-safe RPC client
-
-Hono's `hc` client works with the exported app type for fully typed API calls:
-
-```ts
-import type { App } from './routes.js'
-import { hc } from 'hono/client'
-
-const client = hc<App>('http://localhost:3000')
-const res = await client.hello[':name'].$get({ param: { name: 'world' }, header: { authorization: 'Bearer ...' } })
-```
-
 ## Project structure
 
 ```

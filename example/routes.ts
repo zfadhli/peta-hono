@@ -77,5 +77,4 @@ api(
 // ponytail: no auth on docs — protect it in production if needed.
 docs()
 
-export type App = typeof app
 export default app

@@ -50,44 +50,6 @@ type ReqFor<P extends string, B, Q, H> = ParamsFromPath<P> &
 
 // --- Create the API builder ---
 
-export type CreateApiResult = {
-  /** The underlying OpenAPIHono app. Export `typeof app` for `hc<>()` type-safe client. */
-  app: OpenAPIHono
-  /** Register an API endpoint. */
-  api: <P extends string, B extends AnyZodType | undefined, Q extends AnyZodType | undefined, H extends AnyZodType | undefined>(
-    config: {
-      method: string
-      path: P
-      body?: B
-      query?: Q
-      headers?: H
-      responses?: Record<number, AnyZodType>
-      auth?: string
-      middleware?: MiddlewareHandler[]
-      /** OpenAPI tags for grouping in docs. */
-      tags?: string[]
-      /** OpenAPI summary (shown in docs as the operation title). */
-      summary?: string
-      /** OpenAPI description (shown in docs as the operation description). */
-      description?: string
-      /**
-       * Explicit success HTTP status code.
-       * Defaults to the first 2xx/3xx key in `responses`, or 200.
-       * Use 204 for No Content — the handler should return `null`.
-       */
-      status?: number
-    },
-    handler: (req: ReqFor<P, B, Q, H>) => Promise<any> | any,
-  ) => void
-  /** Register a named auth middleware. Apply via `{ auth: 'name' }` in the config. */
-  auth: (name: string, mw: MiddlewareHandler, scheme?: AuthScheme) => void
-  /**
-   * Mount the OpenAPI spec and Scalar docs UI.
-   * Call once after all routes are registered.
-   */
-  docs: (specPath?: string, uiPath?: string) => void
-}
-
 /**
  * Create an Encore-style API builder on top of Hono + OpenAPI.
  *
@@ -99,16 +61,15 @@ export type CreateApiResult = {
  *   await next()
  * })
  *
- * export const hello = api(
+ * const hello = api(
  *   { method: 'GET', path: '/hello/:name', auth: 'required' },
  *   async ({ name }) => ({ message: `Hello ${name}!` }),
  * )
  *
  * docs()
- * export type App = typeof app
  * ```
  */
-export function createApi(opts: { title?: string; version?: string } = {}): CreateApiResult {
+export function createApi(opts: { title?: string; version?: string } = {}) {
   const app = new OpenAPIHono()
 
   // Global error handler — prevents leaking internal error details to clients
