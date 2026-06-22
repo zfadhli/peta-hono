@@ -1,5 +1,5 @@
 import { type } from 'arktype'
-import { APIError } from '../lib/api.js'
+import { fail } from '../lib/api.js'
 import { api } from './setup.js'
 import { createPost, deletePost, getPost, listPosts, updatePost } from './store.js'
 
@@ -41,7 +41,7 @@ api(
   },
   async ({ id }) => {
     const post = getPost(id)
-    if (!post) throw new APIError(404, 'post not found')
+    if (!post) throw fail.notFound('post not found')
     return post
   },
 )
@@ -84,7 +84,7 @@ api(
   },
   async ({ id, body }) => {
     const updated = updatePost(id, body)
-    if (!updated) throw new APIError(404, 'post not found')
+    if (!updated) throw fail.notFound('post not found')
     return updated
   },
 )
@@ -101,7 +101,7 @@ api(
     auth: 'required',
   },
   async ({ id }) => {
-    if (!deletePost(id)) throw new APIError(404, 'post not found')
+    if (!deletePost(id)) throw fail.notFound('post not found')
     return null
   },
 )

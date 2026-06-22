@@ -1,4 +1,4 @@
-import { createApi, APIError } from '../lib/api.js'
+import { createApi, fail } from '../lib/api.js'
 import { type } from 'arktype'
 
 const { api, auth, docs, app } = createApi({
@@ -43,7 +43,7 @@ api(
   },
   async ({ body }) => {
     if (body.count > 100) {
-      throw new APIError(400, 'count too high')
+      throw fail.badRequest('count too high')
     }
     return { id: crypto.randomUUID() }
   },

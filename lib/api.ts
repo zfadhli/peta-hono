@@ -19,6 +19,19 @@ export class APIError extends Error {
 	}
 }
 
+// --- Named error helpers per HTTP status ---
+
+export const fail = {
+	badRequest: (msg = "Bad Request") => new APIError(400, msg),
+	unauthorized: (msg = "Unauthorized") => new APIError(401, msg),
+	forbidden: (msg = "Forbidden") => new APIError(403, msg),
+	notFound: (msg = "Not Found") => new APIError(404, msg),
+	conflict: (msg = "Conflict") => new APIError(409, msg),
+	unprocessableEntity: (msg = "Unprocessable Entity") => new APIError(422, msg),
+	tooManyRequests: (msg = "Too Many Requests") => new APIError(429, msg),
+	internalServerError: (msg = "Internal Server Error") => new APIError(500, msg),
+};
+
 // --- Internal type utilities ---
 
 type AnyArkType = Type<any, any>;

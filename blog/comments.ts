@@ -1,5 +1,5 @@
 import { type } from 'arktype'
-import { APIError } from '../lib/api.js'
+import { fail } from '../lib/api.js'
 import { api } from './setup.js'
 import { getPost, listComments, createComment, deleteComment } from './store.js'
 
@@ -22,7 +22,7 @@ api(
     responses: { 200: type({ comments: commentSchema.array() }) },
   },
   async ({ postId }) => {
-    if (!getPost(postId)) throw new APIError(404, 'post not found')
+    if (!getPost(postId)) throw fail.notFound('post not found')
     return { comments: listComments(postId) }
   },
 )
@@ -41,7 +41,7 @@ api(
   },
   async ({ postId, body }) => {
     const comment = createComment(postId, body.content, 'bob')
-    if (!comment) throw new APIError(404, 'post not found')
+    if (!comment) throw fail.notFound('post not found')
     return comment
   },
 )
@@ -58,7 +58,7 @@ api(
     auth: 'required',
   },
   async ({ postId, commentId }) => {
-    if (!deleteComment(postId, commentId)) throw new APIError(404, 'comment not found')
+    if (!deleteComment(postId, commentId)) throw fail.notFound('comment not found')
     return null
   },
 )
