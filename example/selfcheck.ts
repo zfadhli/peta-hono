@@ -62,7 +62,7 @@ try {
   })
   const j5: any = await r5.json()
   assert(r5.status === 400, 'things bad body status')
-  assert(j5.success === false, 'things bad body format')
+  assert(typeof j5.error === 'string', 'things bad body format')
 
   // 6. Search — happy path
   const r6 = await fetch(`${baseUrl}/search?q=hello`, { headers: { Authorization: 'Bearer secret' } })

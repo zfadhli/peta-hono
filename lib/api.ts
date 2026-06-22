@@ -1,7 +1,7 @@
-import { OpenAPIHono, createRoute } from '@hono/zod-openapi'
-import { z } from 'zod'
+import { type, Type } from 'arktype'
 import { apiReference } from '@scalar/hono-api-reference'
 import type { MiddlewareHandler } from 'hono'
+import { OpenAPIHono, createRoute } from './openapi.js'
 
 // --- Public error class ---
 
@@ -23,7 +23,7 @@ export type AuthScheme =
 
 // --- Internal type utilities ---
 
-type AnyZodType = z.ZodType<any, any, any>
+type AnyArkType = Type<any, any>
 
 /** Extract `:name` tokens from a Hono-style path. */
 type PathParam<P extends string> =
@@ -44,9 +44,9 @@ type ParamsFromPath<P extends string> = {
  * Body / query / headers are nested under their own keys.
  */
 type ReqFor<P extends string, B, Q, H> = ParamsFromPath<P> &
-  (B extends AnyZodType ? { body: z.infer<B> } : {}) &
-  (Q extends AnyZodType ? { query: z.infer<Q> } : {}) &
-  (H extends AnyZodType ? { headers: z.infer<H> } : {})
+  (B extends AnyArkType ? { body: Record<string, any> } : {}) &
+  (Q extends AnyArkType ? { query: Record<string, any> } : {}) &
+  (H extends AnyArkType ? { headers: Record<string, any> } : {})
 
 // --- Create the API builder ---
 
@@ -94,14 +94,14 @@ export function createApi(opts: { title?: string; version?: string } = {}) {
     }
   }
 
-  function api<P extends string, B extends AnyZodType | undefined, Q extends AnyZodType | undefined, H extends AnyZodType | undefined>(
+  function api<P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(
     config: {
       method: string
       path: P
       body?: B
       query?: Q
       headers?: H
-      responses?: Record<number, AnyZodType>
+      responses?: Record<number, AnyArkType>
       auth?: string
       middleware?: MiddlewareHandler[]
       tags?: string[]
@@ -118,53 +118,25 @@ export function createApi(opts: { title?: string; version?: string } = {}) {
         `api(): method '${config.method}' is not supported. Use one of: GET, POST, PUT, PATCH, DELETE`,
       )
     }
-    const method = raw as 'get' | 'post' | 'put' | 'patch' | 'delete'
+    const method = raw.toUpperCase() as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
-    // Convert :name to {name} for OpenAPI
-    const oapiPath = config.path.replace(/:(\w+)/g, '{$1}')
     const paramNames = [...config.path.matchAll(/:(\w+)/g)].map((m) => m[1]!)
 
-    // Build OpenAPI request shape
-    const request: Record<string, any> = {}
+    // Build request schemas
+    const request: { body?: AnyArkType; query?: AnyArkType; headers?: AnyArkType; params?: AnyArkType } = {}
     if (paramNames.length > 0) {
-      request.params = z.object(
-        Object.fromEntries(paramNames.map((n) => [n, z.string()])),
-      )
+      request.params = type(
+        Object.fromEntries(paramNames.map((n) => [n, 'string'])),
+      ) as unknown as AnyArkType
     }
-    if (config.body) {
-      request.body = { content: { 'application/json': { schema: config.body } } }
-    }
+    if (config.body) request.body = config.body
     if (config.query) request.query = config.query
     if (config.headers) request.headers = config.headers
 
-    // Build response schemas, injecting a default 500 error schema
-    const responses: Record<string, any> = {}
+    // Build response schemas
+    const responses: Record<number, AnyArkType> = {}
     for (const [code, schema] of Object.entries(config.responses ?? {})) {
-      // 204 No Content has no body — don't wrap in content
-      if (code === '204') {
-        responses[code] = { description: 'No Content' }
-      } else {
-        responses[code] = { content: { 'application/json': { schema } } }
-      }
-    }
-    if (!responses['500']) {
-      responses['500'] = {
-        content: {
-          'application/json': {
-            schema: z.object({ error: z.string() }),
-          },
-        },
-      }
-    }
-
-    // Determine success status: explicit `status`, first 2xx/3xx key, or 200
-    const successCode = config.status?.toString()
-      ?? Object.keys(responses).find((k) => k.startsWith('2') || k.startsWith('3'))
-      ?? '200'
-
-    // Auto-add 204 response if it's the success code and not declared
-    if (successCode === '204' && !responses['204']) {
-      responses['204'] = { description: 'No Content' }
+      responses[Number(code)] = schema
     }
 
     // Build auth + custom middleware list
@@ -189,41 +161,22 @@ export function createApi(opts: { title?: string; version?: string } = {}) {
 
     const route = createRoute({
       method,
-      path: oapiPath,
+      path: config.path,
       request: Object.keys(request).length > 0 ? request : undefined,
       responses,
       tags: config.tags,
       summary: config.summary,
       description: config.description,
       security,
+      middleware: mws.length > 0 ? mws : undefined,
+      status: config.status,
     })
 
-    // ponytail: handler cast to `any` — the dynamic route config has `any` response types
-    // that TypeScript can't reconcile. Runtime behavior is correct.
-    const routeConfig = mws.length > 0 ? { ...route, middleware: mws } : route
-    ;(app.openapi as any)(routeConfig, async (c: any) => {
-      try {
-        const req: any = {}
-        if (paramNames.length > 0) {
-          Object.assign(req, c.req.valid('param'))
-        }
-        if (config.body) req.body = c.req.valid('json')
-        if (config.query) req.query = c.req.valid('query')
-        if (config.headers) req.headers = c.req.valid('header')
-
-        const result = await handler(req)
-        // Return null → c.body(null, status) for 204 No Content. undefined falls through to c.json().
-        if (result === null) {
-          return c.body(null, Number(successCode))
-        }
-        return c.json(result, Number(successCode))
-      } catch (e) {
-        if (e instanceof APIError) {
-          return c.json({ error: e.message }, e.status)
-        }
-        throw e
-      }
-    })
+    // Handler receives the assembled request object (not Hono's c):
+    //   { name: 'world', body: {...}, query: {...}, headers: {...} }
+    // app.openapi() handles c.json() wrapping, null→204, and the global
+    // onError handler catches APIError instances.
+    ;(app.openapi as any)(route, (req: any) => handler(req))
   }
 
   function docs(specPath = '/openapi.json', uiPath = '/docs') {

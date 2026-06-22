@@ -1,16 +1,16 @@
-import { z } from 'zod'
+import { type } from 'arktype'
 import { APIError } from '../lib/api.js'
 import { api } from './setup.js'
 import { createPost, deletePost, getPost, listPosts, updatePost } from './store.js'
 
 // --- Reusable response schemas ---
 
-const postSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  content: z.string(),
-  authorId: z.string(),
-  createdAt: z.string(),
+const postSchema = type({
+  id: 'string',
+  title: 'string',
+  content: 'string',
+  authorId: 'string',
+  createdAt: 'string',
 })
 
 // --- GET /posts — list with pagination ---
@@ -21,9 +21,9 @@ api(
     path: '/posts',
     tags: ['Posts'],
     summary: 'List all posts',
-    query: z.object({
-      limit: z.coerce.number().int().min(1).max(100).default(10),
-      offset: z.coerce.number().int().min(0).default(0),
+    query: type({
+      limit: '1 <= number.integer <= 100 = 10',
+      offset: 'number.integer >= 0 = 0',
     }),
   },
   async ({ query }) => listPosts(query.limit, query.offset),
@@ -54,9 +54,9 @@ api(
     path: '/posts',
     tags: ['Posts'],
     summary: 'Create a new post',
-    body: z.object({
-      title: z.string().min(1),
-      content: z.string().min(1),
+    body: type({
+      title: 'string >= 1',
+      content: 'string >= 1',
     }),
     responses: { 201: postSchema },
     auth: 'required',
@@ -75,9 +75,9 @@ api(
     path: '/posts/:id',
     tags: ['Posts'],
     summary: 'Update an existing post',
-    body: z.object({
-      title: z.string().optional(),
-      content: z.string().optional(),
+    body: type({
+      title: 'string?',
+      content: 'string?',
     }),
     responses: { 200: postSchema },
     auth: 'required',

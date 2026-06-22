@@ -180,6 +180,10 @@ try {
   assert(paths.includes('/posts/{postId}/comments'), 'spec has comments list')
   assert(paths.includes('/posts/{postId}/comments/{commentId}'), 'spec has comment delete')
 
+  // Check that the limit query param has default: 10 in the spec
+  const limitParam = spec.paths?.['/posts']?.get?.parameters?.find((p: any) => p.name === 'limit')
+  assert(limitParam?.schema?.default === 10, 'limit default in spec')
+
   // 19. Docs UI returns HTML
   const r12 = await fetch(`${base}/docs`)
   assert(r12.status === 200, 'docs status')
@@ -193,5 +197,5 @@ if (failures.length > 0) {
   for (const f of failures) console.error(`  ✗ ${f}`)
   process.exit(failures.length)
 } else {
-  console.log(`All 40 blog self-checks passed ✓`)
+  console.log(`All 40 blog self-checks passed ✓`) // ponytail: count stays 40 — the default assertion is part of the spec check
 }

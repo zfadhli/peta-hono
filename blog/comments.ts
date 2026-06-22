@@ -1,14 +1,14 @@
-import { z } from 'zod'
+import { type } from 'arktype'
 import { APIError } from '../lib/api.js'
 import { api } from './setup.js'
 import { getPost, listComments, createComment, deleteComment } from './store.js'
 
-const commentSchema = z.object({
-  id: z.string(),
-  postId: z.string(),
-  content: z.string(),
-  authorId: z.string(),
-  createdAt: z.string(),
+const commentSchema = type({
+  id: 'string',
+  postId: 'string',
+  content: 'string >= 1',
+  authorId: 'string',
+  createdAt: 'string',
 })
 
 // --- GET /posts/:postId/comments — list comments for a post ---
@@ -19,7 +19,7 @@ api(
     path: '/posts/:postId/comments',
     tags: ['Comments'],
     summary: 'List comments on a post',
-    responses: { 200: z.object({ comments: z.array(commentSchema) }) },
+    responses: { 200: type({ comments: commentSchema.array() }) },
   },
   async ({ postId }) => {
     if (!getPost(postId)) throw new APIError(404, 'post not found')
@@ -35,7 +35,7 @@ api(
     path: '/posts/:postId/comments',
     tags: ['Comments'],
     summary: 'Add a comment to a post',
-    body: z.object({ content: z.string().min(1) }),
+    body: type({ content: 'string >= 1' }),
     responses: { 201: commentSchema },
     auth: 'required',
   },

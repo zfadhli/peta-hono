@@ -1,5 +1,5 @@
 import { createApi, APIError } from '../lib/api.js'
-import { z } from 'zod'
+import { type } from 'arktype'
 
 const { api, auth, docs, app } = createApi({
   title: 'Encore-style Hono API',
@@ -34,11 +34,11 @@ api(
     path: '/things',
     tags: ['Things'],
     summary: 'Create a new thing',
-    body: z.object({
-      name: z.string().min(1),
-      count: z.number().int().positive(),
+    body: type({
+      name: 'string >= 1',
+      count: 'number.integer > 0',
     }),
-    responses: { 201: z.object({ id: z.string() }) },
+    responses: { 201: type({ id: 'string' }) },
     auth: 'required',
   },
   async ({ body }) => {
@@ -57,9 +57,9 @@ api(
     path: '/search',
     tags: ['Search'],
     summary: 'Search for things',
-    query: z.object({
-      q: z.string(),
-      limit: z.coerce.number().int().min(1).max(100).optional().default(10),
+    query: type({
+      q: 'string',
+      limit: '1 <= number.integer <= 100 = 10',
     }),
     auth: 'required',
   },
