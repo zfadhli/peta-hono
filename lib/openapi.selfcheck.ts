@@ -109,6 +109,13 @@ async function assertSpec() {
 	if (count.type !== "integer")
 		throw new Error(`expected type:integer, got ${count.type}`);
 
+	// Auto-documented framework error: 400 on validated endpoints (no auth → no 401 here)
+	const thingResponses = postThing.responses ?? {};
+	const r400 = thingResponses["400"];
+	if (!r400) throw new Error("POST /things missing auto-documented 400 response");
+	if (r400.description !== "Bad Request")
+		throw new Error(`400 description expected 'Bad Request', got ${r400.description}`);
+
 	// Check GET /search query parameter has minimum/maximum
 	const getSearch = spec.paths?.["/search"]?.get;
 	if (!getSearch) throw new Error("GET /search not in spec");

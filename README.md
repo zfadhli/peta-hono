@@ -26,23 +26,22 @@ Open `http://localhost:3000/docs` for the Scalar API reference UI.
 ## Write an API endpoint
 
 ```ts
-import { createApi, APIError } from './lib/api.js'
+import { createApi, fail } from './lib/api.js'
 import { type } from 'arktype'
 
-const { api, auth, docs, app } = createApi({ title: 'My API', version: '1.0.0' })
+const { api, auth, docs, app } = createApi<{ user: { id: string } }>({ title: 'My API', version: '1.0.0' })
 
-// Register auth middleware
-auth('required', async (c, next) => {
-  if (!c.req.header('Authorization')?.startsWith('Bearer ')) {
-    return c.json({ error: 'unauthorized' }, 401)
-  }
-  await next()
+// Register auth middleware — return-based: throw to reject, return value becomes req.auth
+auth('required', async (c) => {
+  const token = c.req.header('Authorization')
+  if (!token?.startsWith('Bearer ')) throw fail.unauthorized()
+  return { user: { id: 'alice' } }
 })
 
-// GET /hello/:name — path params flat at top level
+// GET /hello/:name — path params flat at top level, auth context available
 api(
   { method: 'GET', path: '/hello/:name', auth: 'required' },
-  async ({ name }) => ({ message: `Hello ${name}!` }),
+  async ({ name, auth }) => ({ message: `Hello ${name}! (${auth.user.id})` }),
 )
 
 // POST /things — body validation via ArkType, typed response
@@ -53,9 +52,9 @@ api(
     responses: { 201: type({ id: 'string' }) },
     auth: 'required',
   },
-  async ({ body }) => {
-    if (body.count > 100) throw new APIError(400, 'count too high')
-    return { id: crypto.randomUUID() }
+  async ({ body, auth }) => {
+    if (body.count > 100) throw fail.badRequest('count too high')
+    return { id: crypto.randomUUID(), userId: auth.user.id }
   },
 )
 
@@ -78,15 +77,15 @@ Run with `nub index.ts`.
 
 ## How it works
 
-- **`createApi({ title, version })`** — returns `{ api, auth, docs, app }`
-- **`api(config, handler)`** — registers a Hono route with OpenAPI metadata. The handler receives a flat request object with types inferred from the ArkType schemas in `config`. Path params (`:name`) are parsed automatically and appear as top-level keys. Config fields:
+- **`createApi<Auth>(opts)`** — returns `{ api, auth, docs, app }`. The optional `Auth` generic types the auth context object that handlers receive as `req.auth` (omit it for apps with no auth).
+- **`api(config, handler)`** — registers a Hono route with OpenAPI metadata. The handler receives a flat request object with types inferred from the ArkType schemas in `config`. Path params (`:name`) are parsed automatically and appear as top-level keys. When `{ auth: 'name' }` is set, the handler also receives `auth: Auth` (typed via `createApi<Auth>`). Config fields:
   - `tags?: string[]` — OpenAPI tags for grouping in docs
   - `summary?: string` — operation title in docs
   - `description?: string` — operation description
   - `status?: number` — explicit success status (use 204 for No Content; handler returns `null`)
-- **`auth(name, middleware, scheme?)`** — registers a named auth middleware. Apply via `{ auth: 'name' }` in the api config. Optional `scheme` registers an OpenAPI security scheme (adds lock icon in docs): `{ type: 'http', scheme: 'bearer' }`, `{ type: 'http', scheme: 'basic' }`, or `{ type: 'apiKey', in: 'header', name: 'X-API-Key' }`.
+- **`auth(name, middleware, scheme?)`** — registers a named auth middleware. **Return-based:** `(c) => Auth` — throw to reject (e.g. `throw fail.unauthorized()`), or return a value that becomes `req.auth` in handlers. Apply via `{ auth: 'name' }` in the api config. Optional `scheme` registers an OpenAPI security scheme (adds lock icon in docs): `{ type: 'http', scheme: 'bearer' }`, `{ type: 'http', scheme: 'basic' }`, or `{ type: 'apiKey', in: 'header', name: 'X-API-Key' }`.
 - **`docs(specPath?, uiPath?)`** — mounts the OpenAPI JSON spec and Scalar docs UI.
-- **`APIError`** — throw typed HTTP errors: `throw new APIError(400, 'bad request')`.
+- **`fail`** — throw named HTTP errors: `throw fail.notFound('post not found')`. Helpers for common codes: `fail.badRequest` (400), `fail.unauthorized` (401), `fail.forbidden` (403), `fail.notFound` (404), `fail.conflict` (409), `fail.unprocessableEntity` (422), `fail.tooManyRequests` (429), `fail.internalServerError` (500). Each accepts an optional message (sensible default if omitted). For custom status codes, use `throw new APIError(status, message)` directly.
 
 Handler returns a plain object (no `c.json()`). The library wraps it in the correct response. Return `null` for 204 No Content.
 
@@ -96,9 +95,10 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
 - Body/query/header validation via ArkType — schemas double as OpenAPI input documentation
 - Response schemas feed into OpenAPI output documentation
 - Auth middleware — named, reusable, applied per-endpoint, with OpenAPI security schemes
+- **Typed auth context** — `createApi<Auth>()` + return-based `auth()` middleware propagate the authenticated user to handlers as `req.auth` with full type safety
+- **`fail` error helpers** — `throw fail.notFound('...')` for ergonomic typed HTTP errors (8 named status helpers + `APIError` for custom codes)
 - OpenAPI tags, summary, description for doc grouping
 - 204 No Content support — handler returns `null`
-- Typed errors via `APIError` — maps to `{ error }` JSON with the right status code
 - Auto-generated OpenAPI 3.0 spec at `/openapi.json`
 - Scalar API reference UI at `/docs`
 - Built on Hono — runs anywhere Hono runs (Node, Bun, Deno, Cloudflare Workers)

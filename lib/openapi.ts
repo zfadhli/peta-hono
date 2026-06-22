@@ -410,12 +410,21 @@ export class OpenAPIHono<
 	): Record<string, OpenAPIResponse> {
 		const responses: Record<string, OpenAPIResponse> = {};
 
+		// Standard OpenAPI descriptions for user-declared success codes
+		const descByCode: Record<string, string> = {
+			"200": "OK",
+			"201": "Created",
+			"202": "Accepted",
+			"204": "No Content",
+		};
+
 		if (config.responses) {
 			for (const [code, schema] of Object.entries(config.responses)) {
 				if (code === "204") {
 					responses[code] = { description: "No Content" };
 				} else {
 					responses[code] = {
+						description: descByCode[code] ?? `Response ${code}`,
 						content: {
 							"application/json": { schema: this._schemaToOA(schema) },
 						},
@@ -432,15 +441,41 @@ export class OpenAPIHono<
 			) ??
 			"200";
 		if (!responses[successCode]) {
-			responses[successCode] = { description: "Success" };
+			responses[successCode] = { description: descByCode[successCode] ?? "Success" };
+		}
+
+		// Framework-guaranteed error responses (zero-config, share one schema component)
+		// 400 Bad Request — any endpoint with validated body/query/headers/params
+		// 401 Unauthorized — any endpoint behind a registered auth scheme
+		const errorSchema = type({ error: "string" });
+		const addFrameworkError = (code: number, description: string) => {
+			const key = String(code);
+			if (!responses[key]) {
+				responses[key] = {
+					description,
+					content: { "application/json": { schema: this._schemaToOA(errorSchema) } },
+				};
+			}
+		};
+
+		if (config.request && !responses["400"]) {
+			if (
+				config.request.body || config.request.query ||
+				config.request.headers || config.request.params
+			) {
+				addFrameworkError(400, "Bad Request");
+			}
+		}
+		if (config.security && !responses["401"]) {
+			addFrameworkError(401, "Unauthorized");
 		}
 
 		// Default 500 (if not already declared by the user)
 		if (!responses["500"]) {
-			const errSchema = type({ error: "string" });
 			responses["500"] = {
+				description: "Internal Server Error",
 				content: {
-					"application/json": { schema: this._schemaToOA(errSchema) },
+					"application/json": { schema: this._schemaToOA(errorSchema) },
 				},
 			};
 		}
