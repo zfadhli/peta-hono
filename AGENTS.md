@@ -6,8 +6,8 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 
 ## Stack
 
-- Runtime: Node.js via [Nub](https://nubjs.com) (`nub file.ts` — no build step)
-- Framework: Hono + `lib/openapi.ts` (in-repo OpenAPIHono + ArkType validator)
+- All-in-one toolkit: [Nub](https://nubjs.com/docs) — runs TypeScript, installs deps, runs scripts, manages Node (`nub file.ts`, `nub install`, `nub run`, `nubx`, `nub node`)
+- Framework: Hono + `src/openapi.ts` (in-repo OpenAPIHono + ArkType validator)
 - Validation: ArkType
 - Docs UI: Scalar (@scalar/hono-api-reference)
 - Language: TypeScript, strict mode, noUncheckedIndexedAccess
@@ -16,22 +16,28 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 
 | Purpose | Command |
 |----------|---------|
-| Run example | `nub example/index.ts` |
-| Run blog | `nub blog/index.ts` |
-| Typecheck | `tsc --noEmit` |
-| Example tests | `nub example/selfcheck.ts` |
-| Blog tests | `nub blog/selfcheck.ts` |
-| Lib tests | `nub lib/openapi.selfcheck.ts` |
-| All tests | `nub lib/openapi.selfcheck.ts && nub example/selfcheck.ts && nub blog/selfcheck.ts` |
+| Install deps | `nub install` |
+| Build package | `nub run build` (tsc emits `dist/`) |
+| Run example | `nub examples/basic/index.ts` |
+| Run blog | `nub examples/blog/index.ts` |
+| Typecheck | `nub run typecheck` |
+| Lint | `nub run lint` |
+| Lint auto-fix | `nub run lint:fix` |
+| Format check | `nub run format` |
+| Example tests | `nub examples/basic/selfcheck.ts` |
+| Blog tests | `nub examples/blog/selfcheck.ts` |
+| Lib tests | `nub src/openapi.selfcheck.ts` |
+| All tests | `nub src/openapi.selfcheck.ts && nub examples/basic/selfcheck.ts && nub examples/blog/selfcheck.ts` |
 
 ## Structure
 
-- `lib/openapi.ts` — OpenAPIHono class, createRoute, arktypeValidator, ArkType/AuthScheme types, OpenAPI spec emission
-- `lib/api.ts` — library: createApi, api, auth, docs, APIError
-- `lib/openapi.selfcheck.ts` — runnable lib integration test
-- `example/` — single-file example app (hello, things, search)
-- `blog/` — multi-file blog API (posts + comments, setup.ts singleton pattern)
-- `blog/spec.snapshot.json` — golden OpenAPI spec for regression detection
+- `src/openapi.ts` — OpenAPIHono class, createRoute, arktypeValidator, ArkType/AuthScheme types, OpenAPI spec emission
+- `src/api.ts` — library: createApi, api, auth, docs, APIError
+- `src/index.ts` — public barrel (re-exports all public API)
+- `src/openapi.selfcheck.ts` — runnable lib integration test
+- `examples/basic/` — single-file example app (hello, things, search)
+- `examples/blog/` — multi-file blog API (posts + comments, setup.ts singleton pattern)
+- `examples/blog/spec.snapshot.json` — golden OpenAPI spec for regression detection
 
 ## Conventions
 
@@ -50,4 +56,4 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 - `APIError(status, message)` for typed HTTP errors (status is `ContentfulStatusCode`)
 - `auth(name, mw, scheme?)` registers middleware + optional OpenAPI security scheme
 - Route import order matters for overlapping paths — more specific routes first
-- To update the blog spec snapshot: `rm blog/spec.snapshot.json && nub blog/selfcheck.ts`
+- To update the blog spec snapshot: `rm examples/blog/spec.snapshot.json && nub examples/blog/selfcheck.ts`

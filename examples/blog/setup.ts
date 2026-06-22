@@ -1,7 +1,7 @@
 // Shared API builder singleton — every route file imports `api` and `auth` from here.
 // ESM modules are singletons, so all routes register on the same `app` instance.
 
-import { createApi, fail } from '../lib/api.js'
+import { createApi, fail } from '../../src/index.js'
 
 const { api, auth, docs, app } = createApi<{ user: { id: string } }>({
   title: 'Blog API',

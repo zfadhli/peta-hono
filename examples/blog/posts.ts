@@ -1,5 +1,5 @@
 import { type } from 'arktype'
-import { fail } from '../lib/api.js'
+import { fail } from '../../src/index.js'
 import { api } from './setup.js'
 import { createPost, deletePost, getPost, listPosts, updatePost } from './store.js'
 

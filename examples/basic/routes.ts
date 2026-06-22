@@ -1,4 +1,4 @@
-import { createApi, fail } from '../lib/api.js'
+import { createApi, fail } from '../../src/index.js'
 import { type } from 'arktype'
 
 const { api, auth, docs, app } = createApi<{ user: { id: string } }>({

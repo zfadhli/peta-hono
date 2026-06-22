@@ -1,10 +1,10 @@
+import { createHash } from "node:crypto";
 import { ArkErrors, type JsonSchema, type Type, type } from "arktype";
 import type { Context, Env, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { Schema } from "hono/types";
 import type { ContentfulStatusCode, StatusCode } from "hono/utils/http-status";
 import { validator } from "hono/validator";
-import { createHash } from "node:crypto";
 
 // --- Types ---
 
@@ -159,10 +159,7 @@ function getNumericFields(schema: ArkType): Set<string> {
  * Coerce string values to numbers for fields the schema expects as numeric.
  * Query params always arrive as strings; this bridges the gap.
  */
-function coerceNumbers(
-	schema: ArkType,
-	data: Record<string, unknown>,
-): Record<string, unknown> {
+function coerceNumbers(schema: ArkType, data: Record<string, unknown>): Record<string, unknown> {
 	const numeric = getNumericFields(schema);
 	if (numeric.size === 0) return data;
 	const out: Record<string, unknown> = { ...data };
@@ -170,7 +167,7 @@ function coerceNumbers(
 		const val = data[key];
 		if (typeof val === "string" && val !== "") {
 			const num = Number(val);
-			if (!isNaN(num)) out[key] = num;
+			if (!Number.isNaN(num)) out[key] = num;
 		}
 	}
 	return out;
@@ -185,10 +182,7 @@ export function arktypeValidator(
 	schema: ArkType,
 ): MiddlewareHandler {
 	return validator(target, (value, c) => {
-		const data = coerceNumbers(
-			schema,
-			(value ?? {}) as Record<string, unknown>,
-		);
+		const data = coerceNumbers(schema, (value ?? {}) as Record<string, unknown>);
 		const result = schema(data);
 		if (result instanceof ArkErrors) {
 			return c.json({ error: result.summary }, 400);
@@ -202,22 +196,22 @@ export function arktypeValidator(
  * Used during _schemaToOA to fix dangling refs after hoisting $defs to components.
  */
 function rewriteRefs(node: unknown, rename: Map<string, string>): void {
-  if (typeof node !== "object" || node === null) return;
-  if (Array.isArray(node)) {
-    for (const item of node) rewriteRefs(item, rename);
-    return;
-  }
-  const obj = node as Record<string, unknown>;
-  const ref = obj.$ref;
-  if (typeof ref === "string") {
-    const m = ref.match(/^#\/\$defs\/(.+)$/);
-    if (m && rename.has(m[1]!)) {
-      obj.$ref = `#/components/schemas/${rename.get(m[1]!)}`;
-    }
-  }
-  for (const key of Object.keys(obj)) {
-    rewriteRefs(obj[key], rename);
-  }
+	if (typeof node !== "object" || node === null) return;
+	if (Array.isArray(node)) {
+		for (const item of node) rewriteRefs(item, rename);
+		return;
+	}
+	const obj = node as Record<string, unknown>;
+	const ref = obj.$ref;
+	if (typeof ref === "string") {
+		const m = ref.match(/^#\/\$defs\/(.+)$/);
+		if (m && rename.has(m[1]!)) {
+			obj.$ref = `#/components/schemas/${rename.get(m[1]!)}`;
+		}
+	}
+	for (const key of Object.keys(obj)) {
+		rewriteRefs(obj[key], rename);
+	}
 }
 
 // --- OpenAPIHono ---
@@ -251,12 +245,9 @@ export class OpenAPIHono<
 			mws.push(arktypeValidator("param", type(paramsDef)));
 		}
 
-		if (config.request?.query)
-			mws.push(arktypeValidator("query", config.request.query));
-		if (config.request?.headers)
-			mws.push(arktypeValidator("header", config.request.headers));
-		if (config.request?.body)
-			mws.push(arktypeValidator("json", config.request.body));
+		if (config.request?.query) mws.push(arktypeValidator("query", config.request.query));
+		if (config.request?.headers) mws.push(arktypeValidator("header", config.request.headers));
+		if (config.request?.body) mws.push(arktypeValidator("json", config.request.body));
 
 		// User-defined middlewares
 		if (config.middleware) mws.push(...config.middleware);
@@ -297,9 +288,7 @@ export class OpenAPIHono<
 			// Determine status: explicit status, first 2xx/3xx in declared responses, or 200
 			const successCode =
 				config.status?.toString() ??
-				Object.keys(config.responses ?? {}).find(
-					(k) => k.startsWith("2") || k.startsWith("3"),
-				) ??
+				Object.keys(config.responses ?? {}).find((k) => k.startsWith("2") || k.startsWith("3")) ??
 				"200";
 
 			if (result === null) {
@@ -310,10 +299,7 @@ export class OpenAPIHono<
 	}
 
 	/** Emit an OpenAPI 3.0 JSON endpoint. */
-	doc(
-		url: string,
-		config: { openapi?: string; info: { title: string; version: string } },
-	): void {
+	doc(url: string, config: { openapi?: string; info: { title: string; version: string } }): void {
 		this.get(url, (c) => {
 			return c.json(this._buildSpec(config));
 		});
@@ -392,9 +378,7 @@ export class OpenAPIHono<
 
 		// Register named security schemes
 		if (this._components.securitySchemes.size > 0) {
-			spec.components.securitySchemes = Object.fromEntries(
-				this._components.securitySchemes,
-			);
+			spec.components.securitySchemes = Object.fromEntries(this._components.securitySchemes);
 		}
 
 		// Register named schemas
@@ -405,9 +389,7 @@ export class OpenAPIHono<
 		return spec;
 	}
 
-	private _buildResponses(
-		config: RouteConfig,
-	): Record<string, OpenAPIResponse> {
+	private _buildResponses(config: RouteConfig): Record<string, OpenAPIResponse> {
 		const responses: Record<string, OpenAPIResponse> = {};
 
 		// Standard OpenAPI descriptions for user-declared success codes
@@ -436,9 +418,7 @@ export class OpenAPIHono<
 		// Determine success code: explicit status, first 2xx/3xx in declared responses, or 200
 		const successCode =
 			config.status?.toString() ??
-			Object.keys(responses).find(
-				(k) => k.startsWith("2") || k.startsWith("3"),
-			) ??
+			Object.keys(responses).find((k) => k.startsWith("2") || k.startsWith("3")) ??
 			"200";
 		if (!responses[successCode]) {
 			responses[successCode] = { description: descByCode[successCode] ?? "Success" };
@@ -460,8 +440,10 @@ export class OpenAPIHono<
 
 		if (config.request && !responses["400"]) {
 			if (
-				config.request.body || config.request.query ||
-				config.request.headers || config.request.params
+				config.request.body ||
+				config.request.query ||
+				config.request.headers ||
+				config.request.params
 			) {
 				addFrameworkError(400, "Bad Request");
 			}

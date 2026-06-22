@@ -1,24 +1,36 @@
-# encore-hono
+# peta-hono
 
 A function-based API DSL on top of [Hono](https://hono.dev) + [ArkType](https://arktype.io).
 
 Write a function, get a typed REST endpoint with auto-generated OpenAPI docs, request validation, and auth middleware — all in a few lines of code.
 
-## Quickstart
+## Install
 
-Requires [Nub](https://nubjs.com) (a Node.js toolkit that runs TypeScript directly — no build step):
+```bash
+nub add peta-hono
+```
+
+Requires `hono` and `arktype` as peer dependencies — install them alongside:
+
+```bash
+nub add peta-hono hono arktype
+```
+
+## Quickstart (dev with Nub)
+
+For local development (TypeScript, no build step), install [Nub](https://nubjs.com/docs):
 
 ```bash
 npm install -g @nubjs/nub
 ```
 
-Then:
+Then clone and run:
 
 ```bash
-npx degit your-mirror/encore-hono my-api
+git clone <your-repo> my-api
 cd my-api
-npm install
-nub example/index.ts
+nub install
+nub examples/basic/index.ts
 ```
 
 Open `http://localhost:3000/docs` for the Scalar API reference UI.
@@ -26,7 +38,7 @@ Open `http://localhost:3000/docs` for the Scalar API reference UI.
 ## Write an API endpoint
 
 ```ts
-import { createApi, fail } from './lib/api.js'
+import { createApi, fail } from 'peta-hono'
 import { type } from 'arktype'
 
 const { api, auth, docs, app } = createApi<{ user: { id: string } }>({ title: 'My API', version: '1.0.0' })
@@ -73,7 +85,7 @@ docs()
 export default app
 ```
 
-Run with `nub index.ts`.
+Run with `nub index.ts` (or `node index.ts` if you've built the lib).
 
 ## How it works
 
@@ -102,36 +114,40 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
 - Auto-generated OpenAPI 3.0 spec at `/openapi.json`
 - Scalar API reference UI at `/docs`
 - Built on Hono — runs anywhere Hono runs (Node, Bun, Deno, Cloudflare Workers)
-- **Zero-config TypeScript** via [Nub](https://nubjs.com) — `nub file.ts` runs it directly
+- **Zero-config TypeScript** via [Nub](https://nubjs.com/docs) — `nub file.ts` runs it directly
 
 ## Project structure
 
 ```
-lib/openapi.ts  — OpenAPIHono class, createRoute, arktypeValidator, spec emission
-lib/api.ts      — createApi, api, auth, docs, APIError
-example/
-  routes.ts     — route definitions (single-file)
-  index.ts      — server entry point
-  selfcheck.ts  — runnable end-to-end test suite
-blog/
-  setup.ts      — shared createApi() + auth singleton (imported by all route files)
-  store.ts      — in-memory data store (posts + comments)
-  posts.ts      — post CRUD routes (list, get, create, update, delete)
-  comments.ts   — comment routes (nested under /posts/:postId)
-  index.ts      — server entry — imports all route files, calls docs(), starts server
-  selfcheck.ts  — runnable end-to-end test suite
+src/
+  openapi.ts    — OpenAPIHono class, createRoute, arktypeValidator, spec emission
+  api.ts        — createApi, api, auth, docs, APIError
+  index.ts      — public barrel (re-exports all public API)
+examples/
+  example/      — single-file example app
+    routes.ts     — route definitions
+    index.ts      — server entry point
+    selfcheck.ts  — runnable end-to-end test suite
+  blog/         — multi-file blog API
+    setup.ts      — shared createApi() + auth singleton
+    store.ts      — in-memory data store
+    posts.ts      — post CRUD routes
+    comments.ts   — nested comment routes
+    index.ts      — server entry
+    selfcheck.ts  — runnable end-to-end test suite
+dist/           — built output (created by `nub run build`)
 ```
 
 ## Multi-file example: Blog API
 
-The `blog/` directory demonstrates how to split routes across files. The pattern is:
+The `examples/blog/` directory demonstrates how to split routes across files. The pattern is:
 
-1. **`blog/setup.ts`** — creates the API builder and auth middleware, exports `{ api, auth, docs, app }`. This is your app's shared singleton — every route file imports `api` from here.
-2. **`blog/posts.ts`** and **`blog/comments.ts`** — import `api` from `setup.ts` and register their routes via top-level `api()` calls. The `api()` function mutates the shared `app` instance.
-3. **`blog/index.ts`** — imports all route files *for their side effects* (the top-level `api()` calls register the routes), then calls `docs()` and starts the server.
+1. **`examples/blog/setup.ts`** — creates the API builder and auth middleware, exports `{ api, auth, docs, app }`. This is your app's shared singleton — every route file imports `api` from here.
+2. **`examples/blog/posts.ts`** and **`examples/blog/comments.ts`** — import `api` from `setup.ts` and register their routes via top-level `api()` calls. The `api()` function mutates the shared `app` instance.
+3. **`examples/blog/index.ts`** — imports all route files *for their side effects* (the top-level `api()` calls register the routes), then calls `docs()` and starts the server.
 
 ```ts
-// blog/index.ts
+// examples/blog/index.ts
 import './posts.js'      // side effect: registers post routes
 import './comments.js'   // side effect: registers comment routes
 import { docs, app } from './setup.js'
@@ -144,6 +160,6 @@ serve(app)
 Run with:
 
 ```bash
-nub blog/index.ts
+nub examples/blog/index.ts
 ```
 

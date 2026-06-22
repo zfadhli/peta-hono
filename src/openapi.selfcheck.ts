@@ -26,7 +26,7 @@ app.openapi(
 		},
 		responses: { 201: type({ id: "string" }) },
 	}),
-	async ({ body }) => {
+	async () => {
 		return { id: crypto.randomUUID() };
 	},
 );
@@ -89,25 +89,20 @@ async function check(name: string, fn: () => Promise<void>) {
 // ── Assertion 1: OpenAPI spec has minimum/maximum ─────────────────
 async function assertSpec() {
 	const res = await app.request("/openapi.json");
-	if (res.status !== 200)
-		throw new Error(`spec endpoint returned ${res.status}`);
+	if (res.status !== 200) throw new Error(`spec endpoint returned ${res.status}`);
 
 	const spec: any = await res.json();
 
 	// Check POST /things body has minimum/maximum on count
 	const postThing = spec.paths?.["/things"]?.post;
 	if (!postThing) throw new Error("POST /things not in spec");
-	const bodySchema =
-		postThing.requestBody?.content?.["application/json"]?.schema;
+	const bodySchema = postThing.requestBody?.content?.["application/json"]?.schema;
 	if (!bodySchema) throw new Error("request body schema missing");
 	const count = bodySchema?.properties?.count;
 	if (!count) throw new Error("count property missing in body schema");
-	if (count.minimum !== 1)
-		throw new Error(`expected minimum:1, got ${count.minimum}`);
-	if (count.maximum !== 100)
-		throw new Error(`expected maximum:100, got ${count.maximum}`);
-	if (count.type !== "integer")
-		throw new Error(`expected type:integer, got ${count.type}`);
+	if (count.minimum !== 1) throw new Error(`expected minimum:1, got ${count.minimum}`);
+	if (count.maximum !== 100) throw new Error(`expected maximum:100, got ${count.maximum}`);
+	if (count.type !== "integer") throw new Error(`expected type:integer, got ${count.type}`);
 
 	// Auto-documented framework error: 400 on validated endpoints (no auth → no 401 here)
 	const thingResponses = postThing.responses ?? {};
@@ -122,13 +117,9 @@ async function assertSpec() {
 	const limitParam = getSearch.parameters?.find((p: any) => p.name === "limit");
 	if (!limitParam) throw new Error("limit query param missing");
 	if (limitParam.schema?.minimum !== 1)
-		throw new Error(
-			`expected schema.minimum:1, got ${limitParam.schema?.minimum}`,
-		);
+		throw new Error(`expected schema.minimum:1, got ${limitParam.schema?.minimum}`);
 	if (limitParam.schema?.maximum !== 100)
-		throw new Error(
-			`expected schema.maximum:100, got ${limitParam.schema?.maximum}`,
-		);
+		throw new Error(`expected schema.maximum:100, got ${limitParam.schema?.maximum}`);
 }
 
 // ── Assertion 2: Coercion ─────────────────────────────────────────
@@ -164,12 +155,10 @@ async function assertRefRewriting() {
 	const specStr = JSON.stringify(spec);
 
 	// No $defs key should remain anywhere in the spec
-	if (specStr.includes('"$defs"'))
-		throw new Error("spec still contains $defs key");
+	if (specStr.includes('"$defs"')) throw new Error("spec still contains $defs key");
 
 	// No $ref should point to #/$defs/ (all should be rewritten)
-	if (specStr.includes('#/$defs/'))
-		throw new Error("spec still contains #/$defs/ refs");
+	if (specStr.includes("#/$defs/")) throw new Error("spec still contains #/$defs/ refs");
 
 	// All $ref values must point to #/components/schemas/
 	const refMatches = specStr.match(/"\$ref":"([^"]+)"/g) ?? [];
@@ -181,8 +170,7 @@ async function assertRefRewriting() {
 
 	// Component schema names must use stable hash format (schema_<12hex>)
 	const schemaKeys = Object.keys(spec.components?.schemas ?? {});
-	if (schemaKeys.length === 0)
-		throw new Error("no schemas in components.schemas");
+	if (schemaKeys.length === 0) throw new Error("no schemas in components.schemas");
 	for (const key of schemaKeys) {
 		if (!/^schema_[a-f0-9]{12}$/.test(key))
 			throw new Error(`schema name "${key}" does not match schema_<12hex> format`);

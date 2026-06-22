@@ -37,12 +37,11 @@ export const fail = {
 type AnyArkType = Type<any, any>;
 
 /** Extract `:name` tokens from a Hono-style path. */
-type PathParam<P extends string> =
-	P extends `${string}:${infer Param}/${infer Rest}`
-		? Param | PathParam<Rest>
-		: P extends `${string}:${infer Param}`
-			? Param
-			: never;
+type PathParam<P extends string> = P extends `${string}:${infer Param}/${infer Rest}`
+	? Param | PathParam<Rest>
+	: P extends `${string}:${infer Param}`
+		? Param
+		: never;
 
 /** Build `{ name: string }` from a path like `/hello/:name`. */
 type ParamsFromPath<P extends string> = {
@@ -169,12 +168,7 @@ export function createApi<Auth = undefined>(opts: { title?: string; version?: st
 				`api(): method '${config.method}' is not supported. Use one of: GET, POST, PUT, PATCH, DELETE`,
 			);
 		}
-		const method = raw.toUpperCase() as
-			| "GET"
-			| "POST"
-			| "PUT"
-			| "PATCH"
-			| "DELETE";
+		const method = raw.toUpperCase() as "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 		const paramNames = [...config.path.matchAll(/:(\w+)/g)].map((m) => m[1]!);
 
@@ -186,9 +180,7 @@ export function createApi<Auth = undefined>(opts: { title?: string; version?: st
 			params?: AnyArkType;
 		} = {};
 		if (paramNames.length > 0) {
-			request.params = type(
-				Object.fromEntries(paramNames.map((n) => [n, "string"])),
-			);
+			request.params = type(Object.fromEntries(paramNames.map((n) => [n, "string"])));
 		}
 		if (config.body) request.body = config.body;
 		if (config.query) request.query = config.query;
@@ -217,9 +209,7 @@ export function createApi<Auth = undefined>(opts: { title?: string; version?: st
 
 		// Attach OpenAPI security if the endpoint uses a registered auth scheme
 		const security =
-			config.auth && authSchemes.has(config.auth)
-				? [{ [config.auth]: [] as string[] }]
-				: undefined;
+			config.auth && authSchemes.has(config.auth) ? [{ [config.auth]: [] as string[] }] : undefined;
 
 		const route = createRoute({
 			method,

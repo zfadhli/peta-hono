@@ -1,25 +1,67 @@
 {
-  "name": "encore-hono",
-  "private": true,
+  "name": "peta-hono",
+  "version": "0.1.0",
+  "description": "Function-based API DSL on Hono + ArkType — declare endpoints, get typed validation, auth, and auto-generated OpenAPI docs.",
   "type": "module",
-  "scripts": {
-    "dev": "nub example/index.ts",
-    "start": "nub example/index.ts",
-    "check": "nub example/selfcheck.ts",
-    "blog": "nub blog/index.ts",
-    "blog:check": "nub blog/selfcheck.ts",
-    "lib:check": "nub lib/openapi.selfcheck.ts",
-    "check:all": "nub lib/openapi.selfcheck.ts && nub example/selfcheck.ts && nub blog/selfcheck.ts",
-    "typecheck": "tsc --noEmit"
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   },
-  "dependencies": {
-    "@hono/node-server": "^1.13.0",
-    "@scalar/hono-api-reference": "^0.5.0",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18.14.1"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "tsc -p tsconfig.build.json",
+    "dev": "nub examples/basic/index.ts",
+    "start": "nub examples/basic/index.ts",
+    "check": "nub examples/basic/selfcheck.ts",
+    "blog": "nub examples/blog/index.ts",
+    "blog:check": "nub examples/blog/selfcheck.ts",
+    "lib:check": "nub src/openapi.selfcheck.ts",
+    "check:all": "nub src/openapi.selfcheck.ts && nub examples/basic/selfcheck.ts && nub examples/blog/selfcheck.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/",
+    "lint:fix": "biome check --write src/",
+    "format": "biome format src/",
+    "format:fix": "biome format --write src/",
+    "test": "nub run check:all"
+  },
+  "peerDependencies": {
     "arktype": "^2.2.1",
     "hono": "^4.7.0"
   },
+  "dependencies": {
+    "@scalar/hono-api-reference": "^0.5.0"
+  },
+  "allowBuilds": {
+    "@evilmartians/lefthook": true
+  },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.0",
+    "@evilmartians/lefthook": "^2.1.9",
+    "@hono/node-server": "^1.13.0",
     "@types/node": "^26.0.0",
     "typescript": "^5.7.0"
-  }
+  },
+  "keywords": [
+    "hono",
+    "arktype",
+    "openapi",
+    "api",
+    "dsl",
+    "rest",
+    "validation",
+    "typescript"
+  ]
 }
