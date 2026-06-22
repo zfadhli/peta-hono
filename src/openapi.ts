@@ -99,19 +99,6 @@ interface ComponentRegistry {
 	securitySchemes: Map<string, AuthScheme>;
 }
 
-type ComponentKind = keyof ComponentRegistry;
-
-type ComponentValue<K extends ComponentKind> =
-	ComponentRegistry[K] extends Map<string, infer V> ? V : never;
-
-export interface OpenAPIRegistryAccessor {
-	registerComponent: <K extends ComponentKind>(
-		type: K,
-		name: string,
-		value: ComponentValue<K>,
-	) => void;
-}
-
 // --- Helpers ---
 
 /** Convert /:param → /{param} for OpenAPI 3.0 paths. */
@@ -305,19 +292,9 @@ export class OpenAPIHono<
 		});
 	}
 
-	/** Access to the component registry. */
-	get openAPIRegistry(): OpenAPIRegistryAccessor {
-		const components = this._components;
-		return {
-			registerComponent: <K extends ComponentKind>(
-				type: K,
-				name: string,
-				value: ComponentValue<K>,
-			): void => {
-				// ponytail: correlated union — TypeScript can't verify K ↔ value relation
-				components[type].set(name, value as never);
-			},
-		};
+	/** Register an OpenAPI security scheme (e.g. bearer, apiKey). */
+	registerSecurityScheme(name: string, scheme: AuthScheme): void {
+		this._components.securitySchemes.set(name, scheme);
 	}
 
 	// --- Spec building ---
@@ -538,9 +515,4 @@ export class OpenAPIHono<
 			params.push(param);
 		}
 	}
-}
-
-/** Create a route config (type-check helper). */
-export function createRoute(config: RouteConfig): RouteConfig {
-	return config;
 }

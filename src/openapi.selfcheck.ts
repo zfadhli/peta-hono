@@ -8,13 +8,13 @@
  */
 
 import { scope, type } from "arktype";
-import { createRoute, OpenAPIHono } from "./openapi.js";
+import { OpenAPIHono } from "./openapi.js";
 
 const app = new OpenAPIHono();
 
 // ── POST /things — body with numeric range ────────────────────────
 app.openapi(
-	createRoute({
+	{
 		method: "POST",
 		path: "/things",
 		summary: "Create a thing",
@@ -25,7 +25,7 @@ app.openapi(
 			}),
 		},
 		responses: { 201: type({ id: "string" }) },
-	}),
+	},
 	async () => {
 		return { id: crypto.randomUUID() };
 	},
@@ -33,7 +33,7 @@ app.openapi(
 
 // ── GET /search — query with coercing number ──────────────────────
 app.openapi(
-	createRoute({
+	{
 		method: "GET",
 		path: "/search",
 		summary: "Search things",
@@ -43,7 +43,7 @@ app.openapi(
 				limit: "1 <= number.integer <= 100",
 			}),
 		},
-	}),
+	},
 	async ({ query }) => {
 		const q = query as { q: string; limit: number };
 		return { q: q.q, limit: q.limit };
@@ -57,12 +57,12 @@ const $tree = scope({ Tree: { label: "string", children: "Tree[]" } });
 const Tree = $tree.export().Tree;
 
 app.openapi(
-	createRoute({
+	{
 		method: "GET",
 		path: "/tree",
 		summary: "Get a tree",
 		responses: { 200: Tree },
-	}),
+	},
 	async () => ({ label: "root", children: [] }),
 );
 

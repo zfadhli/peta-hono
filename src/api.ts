@@ -2,7 +2,7 @@ import { apiReference } from "@scalar/hono-api-reference";
 import { type Type, type } from "arktype";
 import type { Context, MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { type AuthScheme, createRoute, OpenAPIHono } from "./openapi.js";
+import { type AuthScheme, OpenAPIHono } from "./openapi.js";
 
 // Re-export AuthScheme so consumers can import it from api.ts as before
 export type { AuthScheme };
@@ -126,7 +126,7 @@ export function createApi<Auth = undefined>(opts: { title?: string; version?: st
 		auths.set(name, wrapped);
 		if (scheme) {
 			authSchemes.set(name, scheme);
-			app.openAPIRegistry.registerComponent("securitySchemes", name, scheme);
+			app.registerSecurityScheme(name, scheme);
 		}
 	}
 
@@ -211,24 +211,21 @@ export function createApi<Auth = undefined>(opts: { title?: string; version?: st
 		const security =
 			config.auth && authSchemes.has(config.auth) ? [{ [config.auth]: [] as string[] }] : undefined;
 
-		const route = createRoute({
-			method,
-			path: config.path,
-			request: Object.keys(request).length > 0 ? request : undefined,
-			responses,
-			tags: config.tags,
-			summary: config.summary,
-			description: config.description,
-			security,
-			middleware: mws.length > 0 ? mws : undefined,
-			status: config.status,
-		});
-
-		// Handler receives the assembled request object (not Hono's c):
-		//   { name: 'world', body: {...}, query: {...}, headers: {...} }
-		// app.openapi() handles c.json() wrapping, null→204, and the global
-		// onError handler catches APIError instances.
-		app.openapi(route, (req) => handler(req as ReqFor<P, B, Q, H> & { auth: Auth }));
+		app.openapi(
+			{
+				method,
+				path: config.path,
+				request: Object.keys(request).length > 0 ? request : undefined,
+				responses,
+				tags: config.tags,
+				summary: config.summary,
+				description: config.description,
+				security,
+				middleware: mws.length > 0 ? mws : undefined,
+				status: config.status,
+			},
+			(req) => handler(req as ReqFor<P, B, Q, H> & { auth: Auth }),
+		);
 	}
 
 	function docs(specPath = "/openapi.json", uiPath = "/docs") {

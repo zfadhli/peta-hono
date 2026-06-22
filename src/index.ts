@@ -5,4 +5,4 @@ export type { AuthScheme } from "./api.js";
 export { APIError, createApi, fail } from "./api.js";
 export type { ArkType, RouteConfig } from "./openapi.js";
 // --- Low-level (advanced use) ---
-export { arktypeValidator, createRoute, OpenAPIHono } from "./openapi.js";
+export { arktypeValidator, OpenAPIHono } from "./openapi.js";
