@@ -1,7 +1,7 @@
 import { type } from 'arktype'
 import { fail } from '../../src/index.js'
 import { api } from './setup.js'
-import { createPost, deletePost, getPost, listPosts, updatePost } from './store.js'
+import { createPost, deletePost, getPost, listPosts, updatePost } from './db.js'
 
 // --- Reusable response schemas ---
 
@@ -40,7 +40,7 @@ api(
     responses: { 200: postSchema },
   },
   async ({ id }) => {
-    const post = getPost(id)
+    const post = await getPost(id)
     if (!post) throw fail.notFound('post not found')
     return post
   },
@@ -82,10 +82,10 @@ api(
     auth: 'required',
   },
   async ({ id, body, auth }) => {
-    const existing = getPost(id)
+    const existing = await getPost(id)
     if (!existing) throw fail.notFound('post not found')
     if (existing.authorId !== auth.user.id) throw fail.forbidden()
-    const updated = updatePost(id, body)
+    const updated = await updatePost(id, body)
     return updated
   },
 )
@@ -102,10 +102,10 @@ api(
     auth: 'required',
   },
   async ({ id, auth }) => {
-    const existing = getPost(id)
+    const existing = await getPost(id)
     if (!existing) throw fail.notFound('post not found')
     if (existing.authorId !== auth.user.id) throw fail.forbidden()
-    deletePost(id)
+    await deletePost(id)
     return null
   },
 )
