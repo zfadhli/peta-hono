@@ -1,10 +1,20 @@
-import { createHash } from "node:crypto";
 import { ArkErrors, type JsonSchema, type Type, type } from "arktype";
 import type { Context, Env, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { Schema } from "hono/types";
 import type { ContentfulStatusCode, StatusCode } from "hono/utils/http-status";
 import { validator } from "hono/validator";
+
+// --- Web Crypto helpers ---
+
+/** SHA-1 hex digest (first 12 chars) using Web Crypto API — no Node dependency. */
+async function sha1Hex(data: string): Promise<string> {
+	const buf = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(data));
+	const hex = Array.from(new Uint8Array(buf))
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
+	return hex.slice(0, 12);
+}
 
 // --- Types ---
 
@@ -287,8 +297,8 @@ export class OpenAPIHono<
 
 	/** Emit an OpenAPI 3.0 JSON endpoint. */
 	doc(url: string, config: { openapi?: string; info: { title: string; version: string } }): void {
-		this.get(url, (c) => {
-			return c.json(this._buildSpec(config));
+		this.get(url, async (c) => {
+			return c.json(await this._buildSpec(config));
 		});
 	}
 
@@ -299,17 +309,17 @@ export class OpenAPIHono<
 
 	// --- Spec building ---
 
-	private _buildSpec(config: {
+	private async _buildSpec(config: {
 		openapi?: string;
 		info: { title: string; version: string };
-	}): OpenAPISpec {
+	}): Promise<OpenAPISpec> {
 		const paths: Record<string, Record<string, OpenAPIOperation>> = {};
 
 		for (const route of this._routes) {
 			const pathItem = paths[route.oapiPath] ?? {};
 			const op: OpenAPIOperation = {
 				operationId: `${route.method}_${route.oapiPath.replace(/[{}]/g, "").replace(/\//g, "_")}`,
-				responses: this._buildResponses(route.config),
+				responses: await this._buildResponses(route.config),
 			};
 
 			if (route.config.tags) op.tags = route.config.tags;
@@ -320,13 +330,13 @@ export class OpenAPIHono<
 			// Parameters (path + query + header)
 			const params: OpenAPIParameter[] = [];
 			if (route.config.request?.params) {
-				this._addObjectParams(params, route.config.request.params, "path");
+				await this._addObjectParams(params, route.config.request.params, "path");
 			}
 			if (route.config.request?.query) {
-				this._addObjectParams(params, route.config.request.query, "query");
+				await this._addObjectParams(params, route.config.request.query, "query");
 			}
 			if (route.config.request?.headers) {
-				this._addObjectParams(params, route.config.request.headers, "header");
+				await this._addObjectParams(params, route.config.request.headers, "header");
 			}
 			if (params.length > 0) op.parameters = params;
 
@@ -336,7 +346,7 @@ export class OpenAPIHono<
 					required: true,
 					content: {
 						"application/json": {
-							schema: this._schemaToOA(route.config.request.body),
+							schema: await this._schemaToOA(route.config.request.body),
 						},
 					},
 				};
@@ -366,7 +376,7 @@ export class OpenAPIHono<
 		return spec;
 	}
 
-	private _buildResponses(config: RouteConfig): Record<string, OpenAPIResponse> {
+	private async _buildResponses(config: RouteConfig): Promise<Record<string, OpenAPIResponse>> {
 		const responses: Record<string, OpenAPIResponse> = {};
 
 		// Standard OpenAPI descriptions for user-declared success codes
@@ -385,7 +395,7 @@ export class OpenAPIHono<
 					responses[code] = {
 						description: descByCode[code] ?? `Response ${code}`,
 						content: {
-							"application/json": { schema: this._schemaToOA(schema) },
+							"application/json": { schema: await this._schemaToOA(schema) },
 						},
 					};
 				}
@@ -405,12 +415,12 @@ export class OpenAPIHono<
 		// 400 Bad Request — any endpoint with validated body/query/headers/params
 		// 401 Unauthorized — any endpoint behind a registered auth scheme
 		const errorSchema = type({ error: "string" });
-		const addFrameworkError = (code: number, description: string) => {
+		const addFrameworkError = async (code: number, description: string) => {
 			const key = String(code);
 			if (!responses[key]) {
 				responses[key] = {
 					description,
-					content: { "application/json": { schema: this._schemaToOA(errorSchema) } },
+					content: { "application/json": { schema: await this._schemaToOA(errorSchema) } },
 				};
 			}
 		};
@@ -422,11 +432,11 @@ export class OpenAPIHono<
 				config.request.headers ||
 				config.request.params
 			) {
-				addFrameworkError(400, "Bad Request");
+				await addFrameworkError(400, "Bad Request");
 			}
 		}
 		if (config.security && !responses["401"]) {
-			addFrameworkError(401, "Unauthorized");
+			await addFrameworkError(401, "Unauthorized");
 		}
 
 		// Default 500 (if not already declared by the user)
@@ -434,7 +444,7 @@ export class OpenAPIHono<
 			responses["500"] = {
 				description: "Internal Server Error",
 				content: {
-					"application/json": { schema: this._schemaToOA(errorSchema) },
+					"application/json": { schema: await this._schemaToOA(errorSchema) },
 				},
 			};
 		}
@@ -447,7 +457,7 @@ export class OpenAPIHono<
 	 * Uses ArkType's toJsonSchema(), strips $schema, hoists $defs to components/schemas
 	 * with content-hash stable names, and rewrites all $ref pointers accordingly.
 	 */
-	private _schemaToOA(schema: ArkType): JsonSchema {
+	private async _schemaToOA(schema: ArkType): Promise<JsonSchema> {
 		const json = schema.toJsonSchema();
 		// Remove JSON Schema draft meta-schema (not valid in OpenAPI 3.0)
 		delete json.$schema;
@@ -469,10 +479,7 @@ export class OpenAPIHono<
 
 		const rename = new Map<string, string>();
 		for (const [name, def] of defEntries) {
-			const hash = createHash("sha1")
-				.update(normalizeRefs(JSON.stringify(def)))
-				.digest("hex")
-				.slice(0, 12);
+			const hash = await sha1Hex(normalizeRefs(JSON.stringify(def)));
 			rename.set(name, `schema_${hash}`);
 		}
 
@@ -492,13 +499,13 @@ export class OpenAPIHono<
 	}
 
 	/** Walk an ArkType object schema and produce OpenAPI parameter objects. */
-	private _addObjectParams(
+	private async _addObjectParams(
 		params: OpenAPIParameter[],
 		schema: ArkType,
 		inLocation: "path" | "query" | "header",
-	): void {
+	): Promise<void> {
 		// Use _schemaToOA (not raw toJsonSchema) so $defs are hoisted and refs rewritten
-		const json = this._schemaToOA(schema);
+		const json = await this._schemaToOA(schema);
 		if (!isObjectSchema(json) || !json.properties) return;
 
 		const required = new Set<string>(json.required ?? []);

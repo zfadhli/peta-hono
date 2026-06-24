@@ -1,9 +1,17 @@
 {
   "name": "peta-hono",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Function-based API DSL on Hono + ArkType — declare endpoints, get typed validation, auth, and auto-generated OpenAPI docs.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zfadhli/peta-hono.git"
+  },
+  "homepage": "https://github.com/zfadhli/peta-hono#readme",
+  "bugs": {
+    "url": "https://github.com/zfadhli/peta-hono/issues"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

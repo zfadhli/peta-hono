@@ -1,0 +1,25 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # needed for npm provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: nubjs/setup-nub@v0
+        with:
+          cache: true
+      - run: nub ci
+      - run: nub run typecheck
+      - run: nub run check:all
+      - run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-06-24
+
+### Changed
+
+- Swapped `node:crypto` for Web Crypto API — package now portable to any runtime (Bun, Deno, CF Workers, browsers)
+- Updated repository metadata and license holder
+
+### Added
+
+- npm publish workflow with provenance support
+
+### Fixed
+
+- README clone URL now points to the actual repository instead of a placeholder
+
 ## [0.1.0] - 2026-06-23
 
 ### Added
