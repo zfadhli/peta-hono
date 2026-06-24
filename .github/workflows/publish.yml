@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # needed for npm provenance
+      id-token: write # needed for npm provenance (not currently used)
     steps:
       - uses: actions/checkout@v4
       - uses: nubjs/setup-nub@v0
@@ -20,6 +20,7 @@ jobs:
       - run: nub ci
       - run: nub run typecheck
       - run: nub run check:all
-      - run: npm publish --provenance
+      - run: echo "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > .npmrc
+      - run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
