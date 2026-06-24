@@ -27,7 +27,7 @@ npm install -g @nubjs/nub
 Then clone and run:
 
 ```bash
-git clone <your-repo> my-api
+git clone https://github.com/zfadhli/peta-hono my-api
 cd my-api
 nub install
 nub examples/basic/index.ts
