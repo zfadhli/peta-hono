@@ -91,7 +91,9 @@ type RouteFields<P extends string, B, Q, H> = {
  * docs()
  * ```
  */
-export function createApi<Auth = undefined>(opts: { title?: string; version?: string } = {}) {
+export function createApi<Auth = undefined>(
+  opts: { title?: string; version?: string; debug?: boolean } = {},
+) {
   const app = new OpenAPIHono();
 
   // Global error handler — prevents leaking internal error details to clients
@@ -99,9 +101,13 @@ export function createApi<Auth = undefined>(opts: { title?: string; version?: st
     if (err instanceof APIError) {
       return c.json({ error: err.message }, err.status);
     }
-    // ponytail: logs the full error server-side, sends generic message to client.
-    // Add a `debug` option to createApi() to send full error details in dev mode.
     console.error(err);
+    if (opts.debug) {
+      const message = err instanceof Error ? err.message : String(err);
+      const body: Record<string, unknown> = { error: message };
+      if (err instanceof Error && err.stack) body.stack = err.stack;
+      return c.json(body, 500);
+    }
     return c.json({ error: "Internal Server Error" }, 500);
   });
 

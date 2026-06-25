@@ -9,6 +9,7 @@
  */
 
 import { scope, type } from "arktype";
+import { createApi } from "./api.js";
 import { OpenAPIHono } from "./openapi.js";
 
 const app = new OpenAPIHono();
@@ -210,6 +211,22 @@ async function assertValidationErrorReachesOnError() {
     throw new Error("error must be a non-empty string from onError");
 }
 
+// ── Assertion 6: debug mode reveals error details ──────────────────
+async function assertDebugMode() {
+  const { app, api } = createApi<undefined>({ debug: true });
+
+  api({ method: "GET", path: "/crash" }, async () => {
+    throw new Error("db connection failed");
+  });
+
+  const res = await app.request("/crash");
+  if (res.status !== 500) throw new Error(`expected 500, got ${res.status}`);
+  const body: any = await res.json();
+  if (body.error !== "db connection failed")
+    throw new Error(`expected error 'db connection failed', got '${body.error}'`);
+  if (!body.stack) throw new Error("expected stack in debug mode");
+}
+
 // ── Run ───────────────────────────────────────────────────────────
 console.log("=== OpenAPIHono spike self-check ===");
 console.log();
@@ -219,8 +236,9 @@ await check("Query coercion string→number", assertCoercion);
 await check("Validation error returns 400", assertValidation);
 await check("Recursive schema $ref rewriting", assertRefRewriting);
 await check("Validation errors reach app.onError", assertValidationErrorReachesOnError);
+await check("debug mode reveals error details", assertDebugMode);
 
 console.log();
-console.log(`Result: ${passed}/5 passed, ${failed} failed`);
+console.log(`Result: ${passed}/6 passed, ${failed} failed`);
 
 if (failed > 0) process.exit(1);
