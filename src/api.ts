@@ -1,23 +1,14 @@
 import { apiReference } from "@scalar/hono-api-reference";
 import { type Type, type } from "arktype";
 import type { Context, MiddlewareHandler } from "hono";
-import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { type AuthScheme, OpenAPIHono } from "./openapi.js";
+import { APIError, type AuthScheme, OpenAPIHono } from "./openapi.js";
 
 // Re-export AuthScheme so consumers can import it from api.ts as before
 export type { AuthScheme };
-
-// --- Public error class ---
-
-export class APIError extends Error {
-  constructor(
-    public status: ContentfulStatusCode,
-    message: string,
-  ) {
-    super(message);
-    this.name = "APIError";
-  }
-}
+// Re-export APIError (defined in openapi.ts) so the public barrel keeps a
+// stable shape via api.ts. See issue #4: APIError moved to openapi.ts so the
+// validator can throw it without a circular import.
+export { APIError };
 
 // --- Named error helpers per HTTP status ---
 

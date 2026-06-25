@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-06-25
+
+### Fixed
+
+- Validation errors now route through `app.onError` instead of short-circuiting with a direct `Response`. `arktypeValidator` throws `APIError(400, summary)` on validation failure (previously returned `c.json(...)`), so custom `onError` handlers (request IDs, structured logging, env-based message hiding) now see validation 400s. Client-visible response shape (`{ error: string }` 400) is unchanged. `APIError` moved from `api.ts` to `openapi.ts` to break the resulting import cycle; `OpenAPIHono` gained a default `onError` so standalone/advanced use still emits 400s. Closes #4.
+
 ## [0.2.1] - 2026-06-25
 
 ### Fixed

@@ -102,6 +102,22 @@ interface StoredRoute {
   handler: RouteHandler;
 }
 
+// --- Public error class ---
+
+/**
+ * Typed HTTP error. Thrown from handlers (and the validator) to route errors
+ * through `app.onError` — the single chokepoint for all error responses.
+ */
+export class APIError extends Error {
+  constructor(
+    public status: ContentfulStatusCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "APIError";
+  }
+}
+
 // --- Component registry ---
 
 interface ComponentRegistry {
@@ -178,11 +194,13 @@ export function arktypeValidator(
   target: "json" | "query" | "header" | "param",
   schema: ArkType,
 ): MiddlewareHandler {
-  return validator(target, (value, c) => {
+  return validator(target, (value, _c) => {
     const data = coerceNumbers(schema, (value ?? {}) as Record<string, unknown>);
     const result = schema(data);
     if (result instanceof ArkErrors) {
-      return c.json({ error: result.summary }, 400);
+      // Throw (don't return) so validation failures route through app.onError —
+      // the single chokepoint for all errors (request IDs, logging, etc.).
+      throw new APIError(400, result.summary);
     }
     return result;
   });
@@ -223,6 +241,21 @@ export class OpenAPIHono<
     schemas: new Map<string, JsonSchema>(),
     securitySchemes: new Map<string, AuthScheme>(),
   };
+
+  constructor(...args: ConstructorParameters<typeof Hono>) {
+    super(...args);
+    // Default error handler — single chokepoint for validation errors (thrown
+    // by arktypeValidator) and any other thrown errors. createApi() overrides
+    // this with its own identical policy; advanced users can override further.
+    this.onError((err, c) => {
+      if (err instanceof APIError) {
+        return c.json({ error: err.message }, err.status);
+      }
+      // ponytail: logs the full error server-side, sends generic message to client.
+      console.error(err);
+      return c.json({ error: "Internal Server Error" }, 500);
+    });
+  }
 
   /** Register an API endpoint with ArkType validation and OpenAPI metadata. */
   openapi(config: RouteConfig, handler: RouteHandler): void {
