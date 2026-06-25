@@ -41,6 +41,7 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 
 ## Conventions
 
+- Always use `nub` for install/run/build — never `npm`, `pnpm`, or `bun` directly. Exceptions: `npm publish` (Nub has no registry-publish command) and `npm install -g @nubjs/nub` (bootstraps Nub itself).
 - ESM modules (`"type": "module"` in package.json)
 - Import paths use `.js` extensions (Nub resolves to `.ts`)
 - `ponytail:` comments mark deliberate simplifications with ceiling/upgrade path
