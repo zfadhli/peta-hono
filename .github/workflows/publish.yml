@@ -3,8 +3,6 @@ name: Publish
 on:
   release:
     types: [published]
-  push:
-    tags: ["v*.*.*"]
 
 jobs:
   publish:
@@ -13,7 +11,7 @@ jobs:
       contents: read
       id-token: write # needed for npm provenance (not currently used)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: nubjs/setup-nub@v0
         with:
           cache: true
