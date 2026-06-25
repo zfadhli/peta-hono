@@ -31,8 +31,8 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 
 ## Structure
 
-- `src/openapi.ts` — OpenAPIHono class, createRoute, arktypeValidator, ArkType/AuthScheme types, OpenAPI spec emission
-- `src/api.ts` — library: createApi, api, auth, docs, APIError
+- `src/openapi.ts` — OpenAPIHono class (with default `onError`), arktypeValidator, APIError, ArkType/AuthScheme types, OpenAPI spec emission
+- `src/api.ts` — library: createApi, api, auth, docs, fail (re-exports APIError from openapi.ts)
 - `src/index.ts` — public barrel (re-exports all public API)
 - `src/openapi.selfcheck.ts` — runnable lib integration test
 - `examples/basic/` — single-file example app (hello, things, search)
@@ -55,5 +55,7 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 - Handler returns plain object → library wraps in `c.json()`. Return `null` → `c.body(null, status)` for 204
 - `APIError(status, message)` for typed HTTP errors (status is `ContentfulStatusCode`)
 - `auth(name, mw, scheme?)` registers middleware + optional OpenAPI security scheme
+- All errors — handler-thrown `APIError`, validator failures, unexpected throws — route through `app.onError` (single chokepoint). `OpenAPIHono` registers a default `onError`; `createApi()` overrides it with its own policy
+- `arktypeValidator` throws `APIError(400, summary)` on validation failure (does not return a `Response`) so `onError` sees validation errors
 - Route import order matters for overlapping paths — more specific routes first
 - To update the blog spec snapshot: `rm examples/blog/spec.snapshot.json && nub examples/blog/selfcheck.ts`

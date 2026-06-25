@@ -1,10 +1,11 @@
 /**
  * Self-check for lib/openapi.ts spike.
- * Four assertions:
+ * Five assertions:
  *   1. /openapi.json emits minimum/maximum in spec
  *   2. Query param coercion works (string "5" → number 5)
- *   3. Bad body returns 400 with error summary
+ *   3. Bad body returns 400 with error summary (via default onError)
  *   4. Recursive schema: $defs hoisted to components, $ref pointers rewritten
+ *   5. Validation errors flow through app.onError (issue #4 regression guard)
  */
 
 import { scope, type } from "arktype";
@@ -177,6 +178,38 @@ async function assertRefRewriting() {
   }
 }
 
+// ── Assertion 5: Validation errors flow through app.onError ────────
+// Regression guard for issue #4: arktypeValidator must throw (not return a
+// Response) so a custom onError sees validation failures — single chokepoint
+// for request IDs, structured logging, env-based message hiding, etc.
+async function assertValidationErrorReachesOnError() {
+  const probe = new OpenAPIHono();
+  let sawValidationError = false;
+  probe.onError((err, c) => {
+    sawValidationError = true;
+    return c.json({ error: err.message }, 400);
+  });
+  probe.openapi(
+    {
+      method: "POST",
+      path: "/echo",
+      request: { body: type({ name: "string" }) },
+    },
+    async ({ body }) => body as Record<string, unknown>,
+  );
+
+  const res = await probe.request("/echo", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  if (res.status !== 400) throw new Error(`expected 400, got ${res.status}`);
+  if (!sawValidationError) throw new Error("onError was not invoked for validation failure");
+  const body: any = await res.json();
+  if (typeof body.error !== "string" || body.error.length === 0)
+    throw new Error("error must be a non-empty string from onError");
+}
+
 // ── Run ───────────────────────────────────────────────────────────
 console.log("=== OpenAPIHono spike self-check ===");
 console.log();
@@ -185,8 +218,9 @@ await check("OpenAPI spec has minimum/maximum", assertSpec);
 await check("Query coercion string→number", assertCoercion);
 await check("Validation error returns 400", assertValidation);
 await check("Recursive schema $ref rewriting", assertRefRewriting);
+await check("Validation errors reach app.onError", assertValidationErrorReachesOnError);
 
 console.log();
-console.log(`Result: ${passed}/4 passed, ${failed} failed`);
+console.log(`Result: ${passed}/5 passed, ${failed} failed`);
 
 if (failed > 0) process.exit(1);
