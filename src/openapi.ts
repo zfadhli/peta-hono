@@ -9,11 +9,11 @@ import { validator } from "hono/validator";
 
 /** SHA-1 hex digest (first 12 chars) using Web Crypto API — no Node dependency. */
 async function sha1Hex(data: string): Promise<string> {
-	const buf = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(data));
-	const hex = Array.from(new Uint8Array(buf))
-		.map((b) => b.toString(16).padStart(2, "0"))
-		.join("");
-	return hex.slice(0, 12);
+  const buf = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(data));
+  const hex = Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return hex.slice(0, 12);
 }
 
 // --- Types ---
@@ -24,118 +24,118 @@ export type ArkType = Type<any, any>;
 // --- Auth scheme (for OpenAPI security scheme registration) ---
 
 export type AuthScheme =
-	| { type: "http"; scheme: "bearer" | "basic" }
-	| { type: "apiKey"; in: "header" | "query"; name: string };
+  | { type: "http"; scheme: "bearer" | "basic" }
+  | { type: "apiKey"; in: "header" | "query"; name: string };
 
 // --- OpenAPI output types (minimal: only what we emit) ---
 
 interface OpenAPIParameter {
-	name: string;
-	in: "path" | "query" | "header";
-	required: boolean;
-	schema: JsonSchema;
-	description?: string;
+  name: string;
+  in: "path" | "query" | "header";
+  required: boolean;
+  schema: JsonSchema;
+  description?: string;
 }
 
 interface OpenAPIResponse {
-	description?: string;
-	content?: { "application/json": { schema: JsonSchema } };
+  description?: string;
+  content?: { "application/json": { schema: JsonSchema } };
 }
 
 interface OpenAPIRequestBody {
-	required: boolean;
-	content: { "application/json": { schema: JsonSchema } };
+  required: boolean;
+  content: { "application/json": { schema: JsonSchema } };
 }
 
 interface OpenAPIOperation {
-	operationId: string;
-	responses: Record<string, OpenAPIResponse>;
-	tags?: string[];
-	summary?: string;
-	description?: string;
-	security?: Record<string, string[]>[];
-	parameters?: OpenAPIParameter[];
-	requestBody?: OpenAPIRequestBody;
+  operationId: string;
+  responses: Record<string, OpenAPIResponse>;
+  tags?: string[];
+  summary?: string;
+  description?: string;
+  security?: Record<string, string[]>[];
+  parameters?: OpenAPIParameter[];
+  requestBody?: OpenAPIRequestBody;
 }
 
 interface OpenAPIComponents {
-	schemas?: Record<string, JsonSchema>;
-	securitySchemes?: Record<string, AuthScheme>;
+  schemas?: Record<string, JsonSchema>;
+  securitySchemes?: Record<string, AuthScheme>;
 }
 
 interface OpenAPISpec {
-	openapi: string;
-	info: { title: string; version: string };
-	paths: Record<string, Record<string, OpenAPIOperation>>;
-	components: OpenAPIComponents;
+  openapi: string;
+  info: { title: string; version: string };
+  paths: Record<string, Record<string, OpenAPIOperation>>;
+  components: OpenAPIComponents;
 }
 
 // --- Route config ---
 
 export interface RouteConfig {
-	method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-	path: string; // Hono-style /:param
-	request?: {
-		body?: ArkType;
-		query?: ArkType;
-		headers?: ArkType;
-		params?: ArkType;
-	};
-	responses?: Record<number, ArkType>;
-	tags?: string[];
-	summary?: string;
-	description?: string;
-	security?: Record<string, string[]>[];
-	middleware?: MiddlewareHandler[];
-	status?: number;
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  path: string; // Hono-style /:param
+  request?: {
+    body?: ArkType;
+    query?: ArkType;
+    headers?: ArkType;
+    params?: ArkType;
+  };
+  responses?: Record<number, ArkType>;
+  tags?: string[];
+  summary?: string;
+  description?: string;
+  security?: Record<string, string[]>[];
+  middleware?: MiddlewareHandler[];
+  status?: number;
 }
 
 /** Handler signature: receives flat request object, returns JSON-serializable object or null (→ 204). */
 type RouteHandler = (
-	req: Record<string, unknown>,
+  req: Record<string, unknown>,
 ) => Record<string, unknown> | null | Promise<Record<string, unknown> | null>;
 
 interface StoredRoute {
-	method: string;
-	oapiPath: string; // OpenAPI-style /{param}
-	config: RouteConfig;
-	handler: RouteHandler;
+  method: string;
+  oapiPath: string; // OpenAPI-style /{param}
+  config: RouteConfig;
+  handler: RouteHandler;
 }
 
 // --- Component registry ---
 
 interface ComponentRegistry {
-	schemas: Map<string, JsonSchema>;
-	securitySchemes: Map<string, AuthScheme>;
+  schemas: Map<string, JsonSchema>;
+  securitySchemes: Map<string, AuthScheme>;
 }
 
 // --- Helpers ---
 
 /** Convert /:param → /{param} for OpenAPI 3.0 paths. */
 function toOapiPath(path: string): string {
-	return path.replace(/:(\w+)/g, "{$1}");
+  return path.replace(/:(\w+)/g, "{$1}");
 }
 
 /** Normalize method to lowercase. */
 function normalizeMethod(m: string): string {
-	const lower = m.toLowerCase();
-	if (!["get", "post", "put", "patch", "delete"].includes(lower)) {
-		throw new Error(`Unsupported method: ${m}`);
-	}
-	return lower;
+  const lower = m.toLowerCase();
+  if (!["get", "post", "put", "patch", "delete"].includes(lower)) {
+    throw new Error(`Unsupported method: ${m}`);
+  }
+  return lower;
 }
 
 /** Type guard: JsonSchema with type "object". */
 function isObjectSchema(json: JsonSchema): json is JsonSchema.Object {
-	return "type" in json && json.type === "object";
+  return "type" in json && json.type === "object";
 }
 
 /** Check if a JsonSchema property is numeric (number or integer). */
 function isNumericType(prop: JsonSchema): boolean {
-	if (!("type" in prop)) return false;
-	const t = (prop as { type?: string | readonly string[] }).type;
-	if (Array.isArray(t)) return t.includes("number") || t.includes("integer");
-	return t === "number" || t === "integer";
+  if (!("type" in prop)) return false;
+  const t = (prop as { type?: string | readonly string[] }).type;
+  if (Array.isArray(t)) return t.includes("number") || t.includes("integer");
+  return t === "number" || t === "integer";
 }
 
 /**
@@ -143,13 +143,13 @@ function isNumericType(prop: JsonSchema): boolean {
  * Uses toJsonSchema() — public API, no internal AST access.
  */
 function getNumericFields(schema: ArkType): Set<string> {
-	const numeric = new Set<string>();
-	const json = schema.toJsonSchema();
-	if (!isObjectSchema(json) || !json.properties) return numeric;
-	for (const [name, prop] of Object.entries(json.properties)) {
-		if (prop && isNumericType(prop)) numeric.add(name);
-	}
-	return numeric;
+  const numeric = new Set<string>();
+  const json = schema.toJsonSchema();
+  if (!isObjectSchema(json) || !json.properties) return numeric;
+  for (const [name, prop] of Object.entries(json.properties)) {
+    if (prop && isNumericType(prop)) numeric.add(name);
+  }
+  return numeric;
 }
 
 /**
@@ -157,17 +157,17 @@ function getNumericFields(schema: ArkType): Set<string> {
  * Query params always arrive as strings; this bridges the gap.
  */
 function coerceNumbers(schema: ArkType, data: Record<string, unknown>): Record<string, unknown> {
-	const numeric = getNumericFields(schema);
-	if (numeric.size === 0) return data;
-	const out: Record<string, unknown> = { ...data };
-	for (const key of numeric) {
-		const val = data[key];
-		if (typeof val === "string" && val !== "") {
-			const num = Number(val);
-			if (!Number.isNaN(num)) out[key] = num;
-		}
-	}
-	return out;
+  const numeric = getNumericFields(schema);
+  if (numeric.size === 0) return data;
+  const out: Record<string, unknown> = { ...data };
+  for (const key of numeric) {
+    const val = data[key];
+    if (typeof val === "string" && val !== "") {
+      const num = Number(val);
+      if (!Number.isNaN(num)) out[key] = num;
+    }
+  }
+  return out;
 }
 
 /**
@@ -175,17 +175,17 @@ function coerceNumbers(schema: ArkType, data: Record<string, unknown>): Record<s
  * Coerces strings → numbers for numeric fields before validation.
  */
 export function arktypeValidator(
-	target: "json" | "query" | "header" | "param",
-	schema: ArkType,
+  target: "json" | "query" | "header" | "param",
+  schema: ArkType,
 ): MiddlewareHandler {
-	return validator(target, (value, c) => {
-		const data = coerceNumbers(schema, (value ?? {}) as Record<string, unknown>);
-		const result = schema(data);
-		if (result instanceof ArkErrors) {
-			return c.json({ error: result.summary }, 400);
-		}
-		return result;
-	});
+  return validator(target, (value, c) => {
+    const data = coerceNumbers(schema, (value ?? {}) as Record<string, unknown>);
+    const result = schema(data);
+    if (result instanceof ArkErrors) {
+      return c.json({ error: result.summary }, 400);
+    }
+    return result;
+  });
 }
 
 /**
@@ -193,333 +193,343 @@ export function arktypeValidator(
  * Used during _schemaToOA to fix dangling refs after hoisting $defs to components.
  */
 function rewriteRefs(node: unknown, rename: Map<string, string>): void {
-	if (typeof node !== "object" || node === null) return;
-	if (Array.isArray(node)) {
-		for (const item of node) rewriteRefs(item, rename);
-		return;
-	}
-	const obj = node as Record<string, unknown>;
-	const ref = obj.$ref;
-	if (typeof ref === "string") {
-		const m = ref.match(/^#\/\$defs\/(.+)$/);
-		if (m && rename.has(m[1]!)) {
-			obj.$ref = `#/components/schemas/${rename.get(m[1]!)}`;
-		}
-	}
-	for (const key of Object.keys(obj)) {
-		rewriteRefs(obj[key], rename);
-	}
+  if (typeof node !== "object" || node === null) return;
+  if (Array.isArray(node)) {
+    for (const item of node) rewriteRefs(item, rename);
+    return;
+  }
+  const obj = node as Record<string, unknown>;
+  const ref = obj.$ref;
+  if (typeof ref === "string") {
+    const m = ref.match(/^#\/\$defs\/(.+)$/);
+    if (m && rename.has(m[1]!)) {
+      obj.$ref = `#/components/schemas/${rename.get(m[1]!)}`;
+    }
+  }
+  for (const key of Object.keys(obj)) {
+    rewriteRefs(obj[key], rename);
+  }
 }
 
 // --- OpenAPIHono ---
 
 export class OpenAPIHono<
-	E extends Env = Env,
-	S extends Schema = Schema,
-	BasePath extends string = "/",
+  E extends Env = Env,
+  S extends Schema = Schema,
+  BasePath extends string = "/",
 > extends Hono<E, S, BasePath> {
-	private _routes: StoredRoute[] = [];
-	private _components: ComponentRegistry = {
-		schemas: new Map<string, JsonSchema>(),
-		securitySchemes: new Map<string, AuthScheme>(),
-	};
+  private _routes: StoredRoute[] = [];
+  private _components: ComponentRegistry = {
+    schemas: new Map<string, JsonSchema>(),
+    securitySchemes: new Map<string, AuthScheme>(),
+  };
 
-	/** Register an API endpoint with ArkType validation and OpenAPI metadata. */
-	openapi(config: RouteConfig, handler: RouteHandler): void {
-		const method = normalizeMethod(config.method);
-		const oapiPath = toOapiPath(config.path);
-		const paramNames = [...config.path.matchAll(/:(\w+)/g)].map((m) => m[1]!);
+  /** Register an API endpoint with ArkType validation and OpenAPI metadata. */
+  openapi(config: RouteConfig, handler: RouteHandler): void {
+    const method = normalizeMethod(config.method);
+    const oapiPath = toOapiPath(config.path);
+    const paramNames = [...config.path.matchAll(/:(\w+)/g)].map((m) => m[1]!);
 
-		// Build middlewares from request schemas
-		const mws: MiddlewareHandler[] = [];
+    // Build middlewares from request schemas
+    const mws: MiddlewareHandler[] = [];
 
-		if (config.request?.params) {
-			mws.push(arktypeValidator("param", config.request.params));
-		} else if (paramNames.length > 0) {
-			// Auto-generate params schema from path tokens
-			const paramsDef: Record<string, string> = {};
-			for (const name of paramNames) paramsDef[name] = "string";
-			mws.push(arktypeValidator("param", type(paramsDef)));
-		}
+    if (config.request?.params) {
+      mws.push(arktypeValidator("param", config.request.params));
+    } else if (paramNames.length > 0) {
+      // Auto-generate params schema from path tokens
+      const paramsDef: Record<string, string> = {};
+      for (const name of paramNames) paramsDef[name] = "string";
+      mws.push(arktypeValidator("param", type(paramsDef)));
+    }
 
-		if (config.request?.query) mws.push(arktypeValidator("query", config.request.query));
-		if (config.request?.headers) mws.push(arktypeValidator("header", config.request.headers));
-		if (config.request?.body) mws.push(arktypeValidator("json", config.request.body));
+    if (config.request?.query) mws.push(arktypeValidator("query", config.request.query));
+    if (config.request?.headers) mws.push(arktypeValidator("header", config.request.headers));
+    if (config.request?.body) mws.push(arktypeValidator("json", config.request.body));
 
-		// User-defined middlewares
-		if (config.middleware) mws.push(...config.middleware);
+    // User-defined middlewares
+    if (config.middleware) mws.push(...config.middleware);
 
-		// Store route for spec generation
-		this._routes.push({ method, oapiPath, config, handler });
+    // Store route for spec generation
+    this._routes.push({ method, oapiPath, config, handler });
 
-		// Register the Hono route
-		// ponytail: Hono's .on() has 5+ overloads; typed spread dispatch not worth the complexity
-		const dispatch = this.on.bind(this) as unknown as (
-			method: string,
-			path: string,
-			...handlers: MiddlewareHandler[]
-		) => void;
-		dispatch(method, config.path, ...mws, async (c: Context) => {
-			// Hono's valid() is typed via Input generics that don't apply to our dynamic
-			// validator registration; narrow c.req to a simple callable signature.
-			// Cast is on c.req (not extracting valid) to preserve `this` binding.
-			const creq = c.req as unknown as {
-				valid(target: string): Record<string, unknown>;
-			};
-			const req: Record<string, unknown> = {};
+    // Register the Hono route
+    // ponytail: Hono's .on() has 5+ overloads; typed spread dispatch not worth the complexity
+    const dispatch = this.on.bind(this) as unknown as (
+      method: string,
+      path: string,
+      ...handlers: MiddlewareHandler[]
+    ) => void;
+    dispatch(method, config.path, ...mws, async (c: Context) => {
+      // Hono's valid() is typed via Input generics that don't apply to our dynamic
+      // validator registration; narrow c.req to a simple callable signature.
+      // Cast is on c.req (not extracting valid) to preserve `this` binding.
+      const creq = c.req as unknown as {
+        valid(target: string): Record<string, unknown>;
+      };
+      const req: Record<string, unknown> = {};
 
-			// Flatten path params to top level (Encore-style: handler({ name }) not handler({ params: { name } }))
-			if (paramNames.length > 0) {
-				Object.assign(req, creq.valid("param"));
-			}
-			if (config.request?.body) req.body = creq.valid("json");
-			if (config.request?.query) req.query = creq.valid("query");
-			if (config.request?.headers) req.headers = creq.valid("header");
+      // Flatten path params to top level (Encore-style: handler({ name }) not handler({ params: { name } }))
+      if (paramNames.length > 0) {
+        Object.assign(req, creq.valid("param"));
+      }
+      if (config.request?.body) req.body = creq.valid("json");
+      if (config.request?.query) req.query = creq.valid("query");
+      if (config.request?.headers) req.headers = creq.valid("header");
 
-			// Inject auth context set by auth middleware via c.set('auth', ctx)
-			const authCtx = (c as unknown as { get(key: string): unknown }).get("auth");
-			if (authCtx !== undefined) req.auth = authCtx;
+      // Inject auth context set by auth middleware via c.set('auth', ctx)
+      const authCtx = (c as unknown as { get(key: string): unknown }).get("auth");
+      if (authCtx !== undefined) req.auth = authCtx;
 
-			const result = await handler(req);
+      // Expose Hono context for handlers that need it (e.g., session save/destroy)
+      req.c = c;
 
-			// Determine status: explicit status, first 2xx/3xx in declared responses, or 200
-			const successCode =
-				config.status?.toString() ??
-				Object.keys(config.responses ?? {}).find((k) => k.startsWith("2") || k.startsWith("3")) ??
-				"200";
+      const result = await handler(req);
 
-			if (result === null) {
-				return c.body(null, Number(successCode) as StatusCode);
-			}
-			return c.json(result, Number(successCode) as ContentfulStatusCode);
-		});
-	}
+      // If handler returned a Response directly, use it as-is
+      if (result instanceof Response) return result;
 
-	/** Emit an OpenAPI 3.0 JSON endpoint. */
-	doc(url: string, config: { openapi?: string; info: { title: string; version: string } }): void {
-		this.get(url, async (c) => {
-			return c.json(await this._buildSpec(config));
-		});
-	}
+      // Determine status: explicit status, first 2xx/3xx in declared responses, or 200
+      const successCode =
+        config.status?.toString() ??
+        Object.keys(config.responses ?? {}).find((k) => k.startsWith("2") || k.startsWith("3")) ??
+        "200";
 
-	/** Register an OpenAPI security scheme (e.g. bearer, apiKey). */
-	registerSecurityScheme(name: string, scheme: AuthScheme): void {
-		this._components.securitySchemes.set(name, scheme);
-	}
+      if (result === null) {
+        return c.body(null, Number(successCode) as StatusCode);
+      }
+      return c.json(result, Number(successCode) as ContentfulStatusCode);
+    });
+  }
 
-	// --- Spec building ---
+  /** Emit an OpenAPI 3.0 JSON endpoint. */
+  doc(url: string, config: { openapi?: string; info: { title: string; version: string } }): void {
+    this.get(url, async (c) => {
+      return c.json(await this._buildSpec(config));
+    });
+  }
 
-	private async _buildSpec(config: {
-		openapi?: string;
-		info: { title: string; version: string };
-	}): Promise<OpenAPISpec> {
-		const paths: Record<string, Record<string, OpenAPIOperation>> = {};
+  /** Register an OpenAPI security scheme (e.g. bearer, apiKey). */
+  registerSecurityScheme(name: string, scheme: AuthScheme): void {
+    this._components.securitySchemes.set(name, scheme);
+  }
 
-		for (const route of this._routes) {
-			const pathItem = paths[route.oapiPath] ?? {};
-			const op: OpenAPIOperation = {
-				operationId: `${route.method}_${route.oapiPath.replace(/[{}]/g, "").replace(/\//g, "_")}`,
-				responses: await this._buildResponses(route.config),
-			};
+  // --- Spec building ---
 
-			if (route.config.tags) op.tags = route.config.tags;
-			if (route.config.summary) op.summary = route.config.summary;
-			if (route.config.description) op.description = route.config.description;
-			if (route.config.security) op.security = route.config.security;
+  private async _buildSpec(config: {
+    openapi?: string;
+    info: { title: string; version: string };
+  }): Promise<OpenAPISpec> {
+    const paths: Record<string, Record<string, OpenAPIOperation>> = {};
 
-			// Parameters (path + query + header)
-			const params: OpenAPIParameter[] = [];
-			if (route.config.request?.params) {
-				await this._addObjectParams(params, route.config.request.params, "path");
-			}
-			if (route.config.request?.query) {
-				await this._addObjectParams(params, route.config.request.query, "query");
-			}
-			if (route.config.request?.headers) {
-				await this._addObjectParams(params, route.config.request.headers, "header");
-			}
-			if (params.length > 0) op.parameters = params;
+    for (const route of this._routes) {
+      const pathItem = paths[route.oapiPath] ?? {};
+      const op: OpenAPIOperation = {
+        operationId: `${route.method}_${route.oapiPath.replace(/[{}]/g, "").replace(/\//g, "_")}`,
+        responses: await this._buildResponses(route.config),
+      };
 
-			// Request body
-			if (route.config.request?.body) {
-				op.requestBody = {
-					required: true,
-					content: {
-						"application/json": {
-							schema: await this._schemaToOA(route.config.request.body),
-						},
-					},
-				};
-			}
+      if (route.config.tags) op.tags = route.config.tags;
+      if (route.config.summary) op.summary = route.config.summary;
+      if (route.config.description) op.description = route.config.description;
+      if (route.config.security) op.security = route.config.security;
 
-			pathItem[route.method] = op;
-			paths[route.oapiPath] = pathItem;
-		}
+      // Parameters (path + query + header)
+      const params: OpenAPIParameter[] = [];
+      if (route.config.request?.params) {
+        await this._addObjectParams(params, route.config.request.params, "path");
+      }
+      if (route.config.request?.query) {
+        await this._addObjectParams(params, route.config.request.query, "query");
+      }
+      if (route.config.request?.headers) {
+        await this._addObjectParams(params, route.config.request.headers, "header");
+      }
+      if (params.length > 0) op.parameters = params;
 
-		const spec: OpenAPISpec = {
-			openapi: config.openapi ?? "3.0.0",
-			info: config.info,
-			paths,
-			components: {},
-		};
+      // Request body
+      if (route.config.request?.body) {
+        op.requestBody = {
+          required: true,
+          content: {
+            "application/json": {
+              schema: await this._schemaToOA(route.config.request.body),
+            },
+          },
+        };
+      }
 
-		// Register named security schemes
-		if (this._components.securitySchemes.size > 0) {
-			spec.components.securitySchemes = Object.fromEntries(this._components.securitySchemes);
-		}
+      pathItem[route.method] = op;
+      paths[route.oapiPath] = pathItem;
+    }
 
-		// Register named schemas
-		if (this._components.schemas.size > 0) {
-			spec.components.schemas = Object.fromEntries(this._components.schemas);
-		}
+    const spec: OpenAPISpec = {
+      openapi: config.openapi ?? "3.0.0",
+      info: config.info,
+      paths,
+      components: {},
+    };
 
-		return spec;
-	}
+    // Register named security schemes
+    if (this._components.securitySchemes.size > 0) {
+      spec.components.securitySchemes = Object.fromEntries(this._components.securitySchemes);
+    }
 
-	private async _buildResponses(config: RouteConfig): Promise<Record<string, OpenAPIResponse>> {
-		const responses: Record<string, OpenAPIResponse> = {};
+    // Register named schemas
+    if (this._components.schemas.size > 0) {
+      spec.components.schemas = Object.fromEntries(this._components.schemas);
+    }
 
-		// Standard OpenAPI descriptions for user-declared success codes
-		const descByCode: Record<string, string> = {
-			"200": "OK",
-			"201": "Created",
-			"202": "Accepted",
-			"204": "No Content",
-		};
+    return spec;
+  }
 
-		if (config.responses) {
-			for (const [code, schema] of Object.entries(config.responses)) {
-				if (code === "204") {
-					responses[code] = { description: "No Content" };
-				} else {
-					responses[code] = {
-						description: descByCode[code] ?? `Response ${code}`,
-						content: {
-							"application/json": { schema: await this._schemaToOA(schema) },
-						},
-					};
-				}
-			}
-		}
+  private async _buildResponses(config: RouteConfig): Promise<Record<string, OpenAPIResponse>> {
+    const responses: Record<string, OpenAPIResponse> = {};
 
-		// Determine success code: explicit status, first 2xx/3xx in declared responses, or 200
-		const successCode =
-			config.status?.toString() ??
-			Object.keys(responses).find((k) => k.startsWith("2") || k.startsWith("3")) ??
-			"200";
-		if (!responses[successCode]) {
-			responses[successCode] = { description: descByCode[successCode] ?? "Success" };
-		}
+    // Standard OpenAPI descriptions for user-declared success codes
+    const descByCode: Record<string, string> = {
+      "200": "OK",
+      "201": "Created",
+      "202": "Accepted",
+      "204": "No Content",
+    };
 
-		// Framework-guaranteed error responses (zero-config, share one schema component)
-		// 400 Bad Request — any endpoint with validated body/query/headers/params
-		// 401 Unauthorized — any endpoint behind a registered auth scheme
-		const errorSchema = type({ error: "string" });
-		const addFrameworkError = async (code: number, description: string) => {
-			const key = String(code);
-			if (!responses[key]) {
-				responses[key] = {
-					description,
-					content: { "application/json": { schema: await this._schemaToOA(errorSchema) } },
-				};
-			}
-		};
+    if (config.responses) {
+      for (const [code, schema] of Object.entries(config.responses)) {
+        if (code === "204") {
+          responses[code] = { description: "No Content" };
+        } else {
+          responses[code] = {
+            description: descByCode[code] ?? `Response ${code}`,
+            content: {
+              "application/json": { schema: await this._schemaToOA(schema) },
+            },
+          };
+        }
+      }
+    }
 
-		if (config.request && !responses["400"]) {
-			if (
-				config.request.body ||
-				config.request.query ||
-				config.request.headers ||
-				config.request.params
-			) {
-				await addFrameworkError(400, "Bad Request");
-			}
-		}
-		if (config.security && !responses["401"]) {
-			await addFrameworkError(401, "Unauthorized");
-		}
+    // Determine success code: explicit status, first 2xx/3xx in declared responses, or 200
+    const successCode =
+      config.status?.toString() ??
+      Object.keys(responses).find((k) => k.startsWith("2") || k.startsWith("3")) ??
+      "200";
+    if (!responses[successCode]) {
+      responses[successCode] = {
+        description: descByCode[successCode] ?? "Success",
+      };
+    }
 
-		// Default 500 (if not already declared by the user)
-		if (!responses["500"]) {
-			responses["500"] = {
-				description: "Internal Server Error",
-				content: {
-					"application/json": { schema: await this._schemaToOA(errorSchema) },
-				},
-			};
-		}
+    // Framework-guaranteed error responses (zero-config, share one schema component)
+    // 400 Bad Request — any endpoint with validated body/query/headers/params
+    // 401 Unauthorized — any endpoint behind a registered auth scheme
+    const errorSchema = type({ error: "string" });
+    const addFrameworkError = async (code: number, description: string) => {
+      const key = String(code);
+      if (!responses[key]) {
+        responses[key] = {
+          description,
+          content: {
+            "application/json": { schema: await this._schemaToOA(errorSchema) },
+          },
+        };
+      }
+    };
 
-		return responses;
-	}
+    if (config.request && !responses["400"]) {
+      if (
+        config.request.body ||
+        config.request.query ||
+        config.request.headers ||
+        config.request.params
+      ) {
+        await addFrameworkError(400, "Bad Request");
+      }
+    }
+    if (config.security && !responses["401"]) {
+      await addFrameworkError(401, "Unauthorized");
+    }
 
-	/**
-	 * Convert an ArkType schema → OpenAPI Schema Object.
-	 * Uses ArkType's toJsonSchema(), strips $schema, hoists $defs to components/schemas
-	 * with content-hash stable names, and rewrites all $ref pointers accordingly.
-	 */
-	private async _schemaToOA(schema: ArkType): Promise<JsonSchema> {
-		const json = schema.toJsonSchema();
-		// Remove JSON Schema draft meta-schema (not valid in OpenAPI 3.0)
-		delete json.$schema;
+    // Default 500 (if not already declared by the user)
+    if (!responses["500"]) {
+      responses["500"] = {
+        description: "Internal Server Error",
+        content: {
+          "application/json": { schema: await this._schemaToOA(errorSchema) },
+        },
+      };
+    }
 
-		if (!json.$defs) return json;
+    return responses;
+  }
 
-		// Build stable names: originalName → schema_<sha1(normalizedContent).slice(0,12)>
-		// ArkType's auto-generated def names (e.g. "intersection216") are counter-based
-		// and unstable across runs. Since those names also appear inside $ref strings
-		// in the def content, we normalize refs to positional indices before hashing
-		// so the hash depends only on structure, not generated names.
-		const defEntries = Object.entries(json.$defs);
-		const nameToIndex = new Map<string, string>();
-		for (let i = 0; i < defEntries.length; i++) {
-			nameToIndex.set(defEntries[i]![0], String(i));
-		}
-		const normalizeRefs = (s: string): string =>
-			s.replace(/#\/\$defs\/([^"]+)/g, (_, name) => `#/$defs/${nameToIndex.get(name) ?? name}`);
+  /**
+   * Convert an ArkType schema → OpenAPI Schema Object.
+   * Uses ArkType's toJsonSchema(), strips $schema, hoists $defs to components/schemas
+   * with content-hash stable names, and rewrites all $ref pointers accordingly.
+   */
+  private async _schemaToOA(schema: ArkType): Promise<JsonSchema> {
+    const json = schema.toJsonSchema();
+    // Remove JSON Schema draft meta-schema (not valid in OpenAPI 3.0)
+    delete json.$schema;
 
-		const rename = new Map<string, string>();
-		for (const [name, def] of defEntries) {
-			const hash = await sha1Hex(normalizeRefs(JSON.stringify(def)));
-			rename.set(name, `schema_${hash}`);
-		}
+    if (!json.$defs) return json;
 
-		// Rewrite all $ref pointers in-place (main body + nested defs)
-		rewriteRefs(json, rename);
+    // Build stable names: originalName → schema_<sha1(normalizedContent).slice(0,12)>
+    // ArkType's auto-generated def names (e.g. "intersection216") are counter-based
+    // and unstable across runs. Since those names also appear inside $ref strings
+    // in the def content, we normalize refs to positional indices before hashing
+    // so the hash depends only on structure, not generated names.
+    const defEntries = Object.entries(json.$defs);
+    const nameToIndex = new Map<string, string>();
+    for (let i = 0; i < defEntries.length; i++) {
+      nameToIndex.set(defEntries[i]![0], String(i));
+    }
+    const normalizeRefs = (s: string): string =>
+      s.replace(/#\/\$defs\/([^"]+)/g, (_, name) => `#/$defs/${nameToIndex.get(name) ?? name}`);
 
-		// Hoist $defs to components/schemas under stable names
-		for (const [name, def] of Object.entries(json.$defs)) {
-			const stableName = rename.get(name)!;
-			if (!this._components.schemas.has(stableName)) {
-				this._components.schemas.set(stableName, def);
-			}
-		}
-		delete json.$defs;
+    const rename = new Map<string, string>();
+    for (const [name, def] of defEntries) {
+      const hash = await sha1Hex(normalizeRefs(JSON.stringify(def)));
+      rename.set(name, `schema_${hash}`);
+    }
 
-		return json;
-	}
+    // Rewrite all $ref pointers in-place (main body + nested defs)
+    rewriteRefs(json, rename);
 
-	/** Walk an ArkType object schema and produce OpenAPI parameter objects. */
-	private async _addObjectParams(
-		params: OpenAPIParameter[],
-		schema: ArkType,
-		inLocation: "path" | "query" | "header",
-	): Promise<void> {
-		// Use _schemaToOA (not raw toJsonSchema) so $defs are hoisted and refs rewritten
-		const json = await this._schemaToOA(schema);
-		if (!isObjectSchema(json) || !json.properties) return;
+    // Hoist $defs to components/schemas under stable names
+    for (const [name, def] of Object.entries(json.$defs)) {
+      const stableName = rename.get(name)!;
+      if (!this._components.schemas.has(stableName)) {
+        this._components.schemas.set(stableName, def);
+      }
+    }
+    delete json.$defs;
 
-		const required = new Set<string>(json.required ?? []);
-		for (const [name, prop] of Object.entries(json.properties)) {
-			if (!prop) continue;
-			const param: OpenAPIParameter = {
-				name,
-				in: inLocation,
-				required: required.has(name),
-				schema: prop,
-			};
-			const desc = (prop as { description?: string }).description;
-			if (desc) param.description = desc;
-			params.push(param);
-		}
-	}
+    return json;
+  }
+
+  /** Walk an ArkType object schema and produce OpenAPI parameter objects. */
+  private async _addObjectParams(
+    params: OpenAPIParameter[],
+    schema: ArkType,
+    inLocation: "path" | "query" | "header",
+  ): Promise<void> {
+    // Use _schemaToOA (not raw toJsonSchema) so $defs are hoisted and refs rewritten
+    const json = await this._schemaToOA(schema);
+    if (!isObjectSchema(json) || !json.properties) return;
+
+    const required = new Set<string>(json.required ?? []);
+    for (const [name, prop] of Object.entries(json.properties)) {
+      if (!prop) continue;
+      const param: OpenAPIParameter = {
+        name,
+        in: inLocation,
+        required: required.has(name),
+        schema: prop,
+      };
+      const desc = (prop as { description?: string }).description;
+      if (desc) param.description = desc;
+      params.push(param);
+    }
+  }
 }
