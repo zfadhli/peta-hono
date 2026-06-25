@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-06-25
+
+### Added
+
+- Handler access to Hono Context via `req.c` — enables calling `session.save()`/`session.destroy()` for login/logout flows
+- `examples/auth/` — peta-auth integration example with register, login, profile, and logout endpoints
+- `examples/auth/types.d.ts` — TypeScript module augmentation pattern for typed `c.var.session` via Hono's `ContextVariableMap`
+- `peta-auth` as dev dependency for the auth example
+- Blog example now uses Drizzle ORM + SQLite (`@libsql/client`) instead of an in-memory Map store — `examples/blog/db.ts` + `examples/blog/schema.ts`
+
+### Removed
+
+- Blog example's in-memory store (`examples/blog/store.ts`)
+
 ## [0.1.1] - 2026-06-24
 
 ### Changed

@@ -1,6 +1,6 @@
 {
   "name": "peta-hono",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Function-based API DSL on Hono + ArkType — declare endpoints, get typed validation, auth, and auto-generated OpenAPI docs.",
   "type": "module",
   "license": "MIT",
@@ -57,7 +57,10 @@
     "@biomejs/biome": "^2.5.0",
     "@evilmartians/lefthook": "^2.1.9",
     "@hono/node-server": "^1.13.0",
+    "@libsql/client": "^0.14.0",
     "@types/node": "^26.0.0",
+    "drizzle-orm": "^0.38.0",
+    "peta-auth": "0.3.0",
     "typescript": "^5.7.0"
   },
   "keywords": [

@@ -1,7 +1,7 @@
 import { type } from 'arktype'
 import { fail } from '../../src/index.js'
 import { api } from './setup.js'
-import { getPost, listComments, createComment, deleteComment } from './store.js'
+import { getPost, listComments, createComment, deleteComment } from './db.js'
 
 const commentSchema = type({
   id: 'string',
@@ -22,8 +22,8 @@ api(
     responses: { 200: type({ comments: commentSchema.array() }) },
   },
   async ({ postId }) => {
-    if (!getPost(postId)) throw fail.notFound('post not found')
-    return { comments: listComments(postId) }
+    if (!(await getPost(postId))) throw fail.notFound('post not found')
+    return { comments: await listComments(postId) }
   },
 )
 
@@ -40,7 +40,7 @@ api(
     auth: 'required',
   },
   async ({ postId, body, auth }) => {
-    const comment = createComment(postId, body.content, auth.user.id)
+    const comment = await createComment(postId, body.content, auth.user.id)
     if (!comment) throw fail.notFound('post not found')
     return comment
   },
@@ -58,7 +58,7 @@ api(
     auth: 'required',
   },
   async ({ postId, commentId }) => {
-    if (!deleteComment(postId, commentId)) throw fail.notFound('comment not found')
+    if (!(await deleteComment(postId, commentId))) throw fail.notFound('comment not found')
     return null
   },
 )
