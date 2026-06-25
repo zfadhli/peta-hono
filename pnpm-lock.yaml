@@ -11,6 +11,9 @@ importers:
       '@scalar/hono-api-reference':
         specifier: ^0.5.0
         version: 0.5.184(hono@4.12.27)
+      arktype:
+        specifier: ^2.2.1
+        version: 2.2.1
       hono:
         specifier: ^4.7.0
         version: 4.12.27
@@ -41,6 +44,12 @@ importers:
         version: 5.9.3
 
 packages:
+
+  '@ark/schema@0.56.0':
+    resolution: {integrity: sha512-ECg3hox/6Z/nLajxXqNhgPtNdHWC9zNsDyskwO28WinoFEnWow4IsERNz9AnXRhTZJnYIlAJ4uGn3nlLk65vZA==}
+
+  '@ark/util@0.56.0':
+    resolution: {integrity: sha512-BghfRC8b9pNs3vBoDJhcta0/c1J1rsoS1+HgVUreMFPdhz/CRAKReAu57YEllNaSy98rWAdY1gE+gFup7OXpgA==}
 
   '@biomejs/biome@2.5.1':
     resolution: {integrity: sha512-IXWLCxKmae+rI7LOHS1B3EbVisQ6GRAWbhN9msa6KjNCyFWrvKZWR4oUdinaNssrV852OrSHuSPa95h1GPJc7Q==}
@@ -298,6 +307,12 @@ packages:
   '@unhead/schema@1.11.20':
     resolution: {integrity: sha512-0zWykKAaJdm+/Y7yi/Yds20PrUK7XabLe9c3IRcjnwYmSWY6z0Cr19VIs3ozCj8P+GhR+/TI2mwtGlueCEYouA==}
 
+  arkregex@0.0.6:
+    resolution: {integrity: sha512-9mvuMKQuibfWhBrsNYhsKhNb6k9oEHoAJ/FvDiqe8h+E9Siwe0/cro1WVOGgpajXQ9ZHd24yCOf2k35Q/QqUQw==}
+
+  arktype@2.2.1:
+    resolution: {integrity: sha512-CWPJxNoSxrS+NYGB3ufwc/blFonESEW5vBQyYPVS0rf4STu8VWoAWfKJSl5vVVm56h4yxpwbODeYwy6XFKvojA==}
+
   cookie@1.1.1:
     resolution: {integrity: sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ==}
     engines: {node: '>=18'}
@@ -493,6 +508,12 @@ packages:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
 snapshots:
+
+  '@ark/schema@0.56.0':
+    dependencies:
+      '@ark/util': 0.56.0
+
+  '@ark/util@0.56.0': {}
 
   '@biomejs/biome@2.5.1':
     optionalDependencies:
@@ -711,6 +732,16 @@ snapshots:
     dependencies:
       hookable: 5.5.3
       zhead: 2.2.4
+
+  arkregex@0.0.6:
+    dependencies:
+      '@ark/util': 0.56.0
+
+  arktype@2.2.1:
+    dependencies:
+      '@ark/schema': 0.56.0
+      '@ark/util': 0.56.0
+      arkregex: 0.0.6
 
   cookie@1.1.1: {}
 
