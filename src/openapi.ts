@@ -482,6 +482,15 @@ export class OpenAPIHono<
       await addFrameworkError(401, "Unauthorized");
     }
 
+    // 404 Not Found — auto-inject when endpoint has path params (:id → resource lookup)
+    // ponytail: heuristic — path params strongly imply resource lookup. User can override
+    // by declaring an explicit 404 response, which the guard above (`!responses[key]`)
+    // respects. False positives (documenting 404 on endpoints that never throw it) are
+    // benign spec noise.
+    if (!responses["404"] && config.path.match(/:(\w+)/)) {
+      await addFrameworkError(404, "Not Found");
+    }
+
     // Default 500 (if not already declared by the user)
     if (!responses["500"]) {
       responses["500"] = {
