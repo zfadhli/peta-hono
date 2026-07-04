@@ -1,6 +1,6 @@
 {
   "name": "peta-hono",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Function-based API DSL on Hono + ArkType — declare endpoints, get typed validation, auth, and auto-generated OpenAPI docs.",
   "type": "module",
   "license": "MIT",
