@@ -1,7 +1,7 @@
 import { apiReference } from "@scalar/hono-api-reference";
 import { type Type, type } from "arktype";
 import type { Context, MiddlewareHandler } from "hono";
-import { APIError, type AuthScheme, OpenAPIHono } from "./openapi.js";
+import { APIError, type AuthScheme, createErrorHandler, OpenAPIHono } from "./openapi.js";
 
 // Re-export AuthScheme so consumers can import it from api.ts as before
 export type { AuthScheme };
@@ -99,20 +99,10 @@ export function createApi<Auth = undefined>(
 ) {
   const app = new OpenAPIHono();
 
-  // Global error handler — prevents leaking internal error details to clients
-  app.onError((err, c) => {
-    if (err instanceof APIError) {
-      return c.json({ error: err.message }, err.status);
-    }
-    console.error(err);
-    if (opts.debug) {
-      const message = err instanceof Error ? err.message : String(err);
-      const body: Record<string, unknown> = { error: message };
-      if (err instanceof Error && err.stack) body.stack = err.stack;
-      return c.json(body, 500);
-    }
-    return c.json({ error: "Internal Server Error" }, 500);
-  });
+  // Global error handler — single chokepoint via shared createErrorHandler policy.
+  // Replaces the default handler installed by OpenAPIHono with a debug-aware variant
+  // that is safely gated by NODE_ENV=production (warns and redacts in prod).
+  app.onError(createErrorHandler(opts.debug));
 
   const auths = new Map<string, MiddlewareHandler>();
   const authSchemes = new Map<string, AuthScheme>();

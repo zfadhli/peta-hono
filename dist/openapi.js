@@ -10,6 +10,29 @@ async function sha1Hex(data) {
         .join("");
     return hex.slice(0, 12);
 }
+export function createErrorHandler(debug) {
+    return (err, c) => {
+        if (err instanceof APIError) {
+            return c.json({ error: err.message }, err.status);
+        }
+        // ponytail: logs the full error server-side, sends generic message to client.
+        console.error(err);
+        const isProd = typeof process !== "undefined" &&
+            process.env?.NODE_ENV === "production";
+        if (debug && isProd) {
+            console.warn("[peta-hono] debug enabled in production — redacting error details");
+        }
+        const effectiveDebug = !!debug && !isProd;
+        if (effectiveDebug) {
+            const message = err instanceof Error ? err.message : String(err);
+            const body = { error: message };
+            if (err instanceof Error && err.stack)
+                body.stack = err.stack;
+            return c.json(body, 500);
+        }
+        return c.json({ error: "Internal Server Error" }, 500);
+    };
+}
 // --- Public error class ---
 /**
  * Typed HTTP error. Thrown from handlers (and the validator) to route errors
@@ -238,16 +261,9 @@ export class OpenAPIHono extends Hono {
     constructor(...args) {
         super(...args);
         // Default error handler — single chokepoint for validation errors (thrown
-        // by arktypeValidator) and any other thrown errors. createApi() overrides
-        // this with its own identical policy; advanced users can override further.
-        this.onError((err, c) => {
-            if (err instanceof APIError) {
-                return c.json({ error: err.message }, err.status);
-            }
-            // ponytail: logs the full error server-side, sends generic message to client.
-            console.error(err);
-            return c.json({ error: "Internal Server Error" }, 500);
-        });
+        // by arktypeValidator) and any other thrown errors. Uses the shared
+        // createErrorHandler policy; createApi() overrides with debug-aware variant.
+        this.onError(createErrorHandler());
     }
     /** Register an API endpoint with ArkType validation and OpenAPI metadata. */
     openapi(config, handler) {

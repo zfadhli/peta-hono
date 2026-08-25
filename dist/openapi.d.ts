@@ -1,5 +1,5 @@
 import { type Type } from "arktype";
-import type { Env, MiddlewareHandler } from "hono";
+import type { Context, Env, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { Schema } from "hono/types";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -30,6 +30,9 @@ export interface RouteConfig {
     middleware?: MiddlewareHandler[];
     status?: number;
 }
+/** Single error policy — shared by OpenAPIHono and createApi (via createErrorHandler). */
+export type ErrorHandler = (err: Error, c: Context) => Response | Promise<Response>;
+export declare function createErrorHandler(debug?: boolean): ErrorHandler;
 /** Handler signature: receives flat request object, returns JSON-serializable object or null (→ 204). */
 type RouteHandler = (req: Record<string, unknown>) => Record<string, unknown> | null | Promise<Record<string, unknown> | null>;
 /**

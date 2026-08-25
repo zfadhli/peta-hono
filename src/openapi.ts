@@ -90,6 +90,33 @@ export interface RouteConfig {
   status?: number;
 }
 
+/** Single error policy — shared by OpenAPIHono and createApi (via createErrorHandler). */
+export type ErrorHandler = (err: Error, c: Context) => Response | Promise<Response>;
+
+export function createErrorHandler(debug?: boolean): ErrorHandler {
+  return (err, c) => {
+    if (err instanceof APIError) {
+      return c.json({ error: err.message }, err.status);
+    }
+    // ponytail: logs the full error server-side, sends generic message to client.
+    console.error(err);
+    const isProd =
+      typeof process !== "undefined" &&
+      (process as unknown as { env?: Record<string, string> }).env?.NODE_ENV === "production";
+    if (debug && isProd) {
+      console.warn("[peta-hono] debug enabled in production — redacting error details");
+    }
+    const effectiveDebug = !!debug && !isProd;
+    if (effectiveDebug) {
+      const message = err instanceof Error ? err.message : String(err);
+      const body: Record<string, unknown> = { error: message };
+      if (err instanceof Error && err.stack) body.stack = err.stack;
+      return c.json(body, 500);
+    }
+    return c.json({ error: "Internal Server Error" }, 500);
+  };
+}
+
 /** Handler signature: receives flat request object, returns JSON-serializable object or null (→ 204). */
 type RouteHandler = (
   req: Record<string, unknown>,
@@ -349,16 +376,9 @@ export class OpenAPIHono<
   constructor(...args: ConstructorParameters<typeof Hono>) {
     super(...args);
     // Default error handler — single chokepoint for validation errors (thrown
-    // by arktypeValidator) and any other thrown errors. createApi() overrides
-    // this with its own identical policy; advanced users can override further.
-    this.onError((err, c) => {
-      if (err instanceof APIError) {
-        return c.json({ error: err.message }, err.status);
-      }
-      // ponytail: logs the full error server-side, sends generic message to client.
-      console.error(err);
-      return c.json({ error: "Internal Server Error" }, 500);
-    });
+    // by arktypeValidator) and any other thrown errors. Uses the shared
+    // createErrorHandler policy; createApi() overrides with debug-aware variant.
+    this.onError(createErrorHandler());
   }
 
   /** Register an API endpoint with ArkType validation and OpenAPI metadata. */
