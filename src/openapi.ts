@@ -619,13 +619,14 @@ export class OpenAPIHono<
       }
     };
 
-    if (config.request && !responses["400"]) {
-      if (
-        config.request.body ||
-        config.request.query ||
-        config.request.headers ||
-        config.request.params
-      ) {
+    if (!responses["400"]) {
+      const hasValidation =
+        !!config.request?.body ||
+        !!config.request?.query ||
+        !!config.request?.headers ||
+        !!config.request?.params ||
+        /:([a-zA-Z0-9_]+)(?:\{[^}]+\})?\??/.test(config.path);
+      if (hasValidation) {
         await addFrameworkError(400, "Bad Request");
       }
     }
@@ -635,9 +636,11 @@ export class OpenAPIHono<
 
     // 404 Not Found — auto-inject when endpoint has path params (:id → resource lookup)
     // ponytail: heuristic — path params strongly imply resource lookup. User can override
-    // by declaring an explicit 404 response, which the guard above (`!responses[key]`)
-    // respects. False positives (documenting 404 on endpoints that never throw it) are
-    // benign spec noise.
+    // by declaring an explicit 404 response, which the guard (`!responses["404"]`) respects.
+    // False positives (documenting 404 on endpoints that never throw it) are benign spec noise.
+    // Ceiling: heuristic covers ~95% of resource routes. Upgrade: add an explicit
+    // `documentNotFound` opt-in or `responses: {404: schema}` when false positives matter
+    // or 404 needs a custom schema.
     if (!responses["404"] && config.path.match(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?\??/)) {
       await addFrameworkError(404, "Not Found");
     }
