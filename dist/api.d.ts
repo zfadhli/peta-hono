@@ -14,6 +14,10 @@ export declare const fail: {
     internalServerError: (msg?: string) => APIError;
 };
 type AnyArkType = Type<any, any>;
+/** Extract the inferred output type from an ArkType instance. */
+type ArkInfer<T> = T extends {
+    infer: infer I;
+} ? I : never;
 /** Extract `:name` tokens from a Hono-style path. */
 type PathParam<P extends string> = P extends `${string}:${infer Param}/${infer Rest}` ? Param | PathParam<Rest> : P extends `${string}:${infer Param}` ? Param : never;
 /** Build `{ name: string }` from a path like `/hello/:name`. */
@@ -26,11 +30,11 @@ type ParamsFromPath<P extends string> = {
  * Body / query / headers are nested under their own keys.
  */
 type ReqFor<P extends string, B, Q, H> = ParamsFromPath<P> & (B extends AnyArkType ? {
-    body: Record<string, any>;
+    body: ArkInfer<B>;
 } : {}) & (Q extends AnyArkType ? {
-    query: Record<string, any>;
+    query: ArkInfer<Q>;
 } : {}) & (H extends AnyArkType ? {
-    headers: Record<string, any>;
+    headers: ArkInfer<H>;
 } : {}) & {
     c: Context;
 };
