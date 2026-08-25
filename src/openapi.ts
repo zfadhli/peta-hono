@@ -496,7 +496,7 @@ export class OpenAPIHono<
 
     for (const route of this._routes) {
       const pathItem = paths[route.oapiPath] ?? {};
-      const baseId = `${route.method}_${route.oapiPath.replace(/[{}]/g, "").replace(/\//g, "_").replace(/\*/g, "wildcard")}`;
+      const baseId = `${route.method}_${route.oapiPath.replace(/[{}]/g, "").replace(/\//g, "_")}`;
       let operationId = baseId;
       if (seenOperationIds.has(operationId)) {
         let n = (baseCounts.get(baseId) ?? 1) + 1;
