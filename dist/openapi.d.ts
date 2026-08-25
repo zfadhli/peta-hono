@@ -42,7 +42,8 @@ export declare class APIError extends Error {
 }
 /**
  * Create a Hono validator middleware from an ArkType schema.
- * Coerces strings → numbers for numeric fields before validation.
+ * Coerces strings → numbers/booleans (deep, element-wise for arrays and nested objects)
+ * before validation so query/header strings pass typed schemas.
  */
 export declare function arktypeValidator(target: "json" | "query" | "header" | "param", schema: ArkType): MiddlewareHandler;
 export declare class OpenAPIHono<E extends Env = Env, S extends Schema = Schema, BasePath extends string = "/"> extends Hono<E, S, BasePath> {
