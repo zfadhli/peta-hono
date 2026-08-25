@@ -18,6 +18,10 @@ jobs:
       - run: nub ci
       - run: nub run typecheck
       - run: nub run check:all
+      # Fail the publish if the committed dist/ is stale — a fresh build must
+      # produce no diff. npm publish also runs prepublishOnly (same gate), but
+      # surfacing it here gives a clear failure point before the registry call.
+      - run: nub run check:dist
       - run: echo "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > .npmrc
       - run: npm publish
         env:

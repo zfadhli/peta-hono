@@ -1,0 +1,76 @@
+import { type Type } from "arktype";
+import type { Env, MiddlewareHandler } from "hono";
+import { Hono } from "hono";
+import type { Schema } from "hono/types";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
+/** Any ArkType type instance — has toJsonSchema() and is callable for validation. */
+export type ArkType = Type<any, any>;
+export type AuthScheme = {
+    type: "http";
+    scheme: "bearer" | "basic";
+} | {
+    type: "apiKey";
+    in: "header" | "query";
+    name: string;
+};
+export interface RouteConfig {
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    path: string;
+    request?: {
+        body?: ArkType;
+        query?: ArkType;
+        headers?: ArkType;
+        params?: ArkType;
+    };
+    responses?: Record<number, ArkType>;
+    tags?: string[];
+    summary?: string;
+    description?: string;
+    security?: Record<string, string[]>[];
+    middleware?: MiddlewareHandler[];
+    status?: number;
+}
+/** Handler signature: receives flat request object, returns JSON-serializable object or null (→ 204). */
+type RouteHandler = (req: Record<string, unknown>) => Record<string, unknown> | null | Promise<Record<string, unknown> | null>;
+/**
+ * Typed HTTP error. Thrown from handlers (and the validator) to route errors
+ * through `app.onError` — the single chokepoint for all error responses.
+ */
+export declare class APIError extends Error {
+    status: ContentfulStatusCode;
+    constructor(status: ContentfulStatusCode, message: string);
+}
+/**
+ * Create a Hono validator middleware from an ArkType schema.
+ * Coerces strings → numbers for numeric fields before validation.
+ */
+export declare function arktypeValidator(target: "json" | "query" | "header" | "param", schema: ArkType): MiddlewareHandler;
+export declare class OpenAPIHono<E extends Env = Env, S extends Schema = Schema, BasePath extends string = "/"> extends Hono<E, S, BasePath> {
+    private _routes;
+    private _components;
+    constructor(...args: ConstructorParameters<typeof Hono>);
+    /** Register an API endpoint with ArkType validation and OpenAPI metadata. */
+    openapi(config: RouteConfig, handler: RouteHandler): void;
+    /** Emit an OpenAPI 3.0 JSON endpoint. */
+    doc(url: string, config: {
+        openapi?: string;
+        info: {
+            title: string;
+            version: string;
+        };
+    }): void;
+    /** Register an OpenAPI security scheme (e.g. bearer, apiKey). */
+    registerSecurityScheme(name: string, scheme: AuthScheme): void;
+    private _buildSpec;
+    private _buildResponses;
+    /**
+     * Convert an ArkType schema → OpenAPI Schema Object.
+     * Uses ArkType's toJsonSchema(), strips $schema, hoists $defs to components/schemas
+     * with content-hash stable names, and rewrites all $ref pointers accordingly.
+     */
+    private _schemaToOA;
+    /** Walk an ArkType object schema and produce OpenAPI parameter objects. */
+    private _addObjectParams;
+}
+export {};
+//# sourceMappingURL=openapi.d.ts.map
