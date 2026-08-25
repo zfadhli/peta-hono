@@ -30,7 +30,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check:dist": "nub run build && git diff HEAD --exit-code -- dist/",
+    "check:dist": "nub run build && STALE=$(git status --porcelain -- dist/) && if [ -n \"$STALE\" ]; then echo 'dist/ is stale — run `nub run build` and commit dist/:' \"$STALE\"; exit 1; fi",
     "prepublishOnly": "nub run check:dist",
     "dev": "nub examples/basic/index.ts",
     "check": "nub examples/basic/selfcheck.ts",
