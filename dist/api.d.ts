@@ -18,8 +18,10 @@ type AnyArkType = Type<any, any>;
 type ArkInfer<T> = T extends {
     infer: infer I;
 } ? I : never;
-/** Extract `:name` tokens from a Hono-style path. */
-type PathParam<P extends string> = P extends `${string}:${infer Param}/${infer Rest}` ? Param | PathParam<Rest> : P extends `${string}:${infer Param}` ? Param : never;
+/** Strip regex `{...}` and optional `?` suffix from a param token. */
+type StripParam<S extends string> = S extends `${infer Name}{${string}}` ? StripParam<Name> : S extends `${infer Name}?` ? Name : S;
+/** Extract `:name` tokens from a Hono-style path (handles :name, :name{regex}, :name?, etc.). */
+type PathParam<P extends string> = P extends `${string}:${infer Param}/${infer Rest}` ? StripParam<Param> | PathParam<`/${Rest}`> : P extends `${string}:${infer Param}` ? StripParam<Param> : never;
 /** Build `{ name: string }` from a path like `/hello/:name`. */
 type ParamsFromPath<P extends string> = {
     [K in PathParam<P> & string]: string;

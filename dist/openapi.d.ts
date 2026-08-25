@@ -43,6 +43,7 @@ export declare class APIError extends Error {
     status: ContentfulStatusCode;
     constructor(status: ContentfulStatusCode, message: string);
 }
+export declare function normalizeMethod(m: string): string;
 /**
  * Create a Hono validator middleware from an ArkType schema.
  * Coerces strings → numbers/booleans (deep, element-wise for arrays and nested objects)
@@ -67,6 +68,8 @@ export declare class OpenAPIHono<E extends Env = Env, S extends Schema = Schema,
     registerSecurityScheme(name: string, scheme: AuthScheme): void;
     private _buildSpec;
     private _buildResponses;
+    private _errorSchemaRef;
+    private _getErrorSchemaRef;
     /**
      * Convert an ArkType schema → OpenAPI Schema Object.
      * Uses ArkType's toJsonSchema(), strips $schema, hoists $defs to components/schemas

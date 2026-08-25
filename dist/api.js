@@ -1,6 +1,6 @@
 import { apiReference } from "@scalar/hono-api-reference";
 import { type } from "arktype";
-import { APIError, createErrorHandler, OpenAPIHono } from "./openapi.js";
+import { APIError, createErrorHandler, normalizeMethod, OpenAPIHono, } from "./openapi.js";
 // Re-export APIError (defined in openapi.ts) so the public barrel keeps a
 // stable shape via api.ts. See issue #4: APIError moved to openapi.ts so the
 // validator can throw it without a circular import.
@@ -60,13 +60,11 @@ export function createApi(opts = {}) {
         }
     }
     function api(config, handler) {
-        // Normalize method to lowercase (accept 'GET' or 'get')
-        const raw = config.method.toLowerCase();
-        if (!["get", "post", "put", "patch", "delete"].includes(raw)) {
-            throw new Error(`api(): method '${config.method}' is not supported. Use one of: GET, POST, PUT, PATCH, DELETE`);
-        }
-        const method = raw.toUpperCase();
-        const paramNames = [...config.path.matchAll(/:(\w+)/g)].map((m) => m[1]);
+        // Method normalization is case-insensitive and uses the single
+        // normalizeMethod helper (same message as OpenAPIHono) for consistency.
+        const normalized = normalizeMethod(config.method);
+        const method = normalized.toUpperCase();
+        const paramNames = [...config.path.matchAll(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?\??/g)].map((m) => m[1]);
         // Build request schemas
         const request = {};
         if (paramNames.length > 0) {

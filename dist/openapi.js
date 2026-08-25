@@ -47,17 +47,25 @@ export class APIError extends Error {
     }
 }
 // --- Helpers ---
-/** Convert /:param → /{param} for OpenAPI 3.0 paths. */
-function toOapiPath(path) {
-    return path.replace(/:(\w+)/g, "{$1}");
-}
-/** Normalize method to lowercase. */
-function normalizeMethod(m) {
+const SUPPORTED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+export function normalizeMethod(m) {
     const lower = m.toLowerCase();
-    if (!["get", "post", "put", "patch", "delete"].includes(lower)) {
-        throw new Error(`Unsupported method: ${m}`);
+    if (!SUPPORTED_METHODS.map((s) => s.toLowerCase()).includes(lower)) {
+        throw new Error(`Unsupported method: ${m}. Use one of: ${SUPPORTED_METHODS.join(", ")}`);
     }
     return lower;
+}
+/**
+ * Convert Hono-style /:param → OpenAPI 3.0 /{param} for all Hono token shapes.
+ * Handles :name, :name{regex}, :name?, :name{regex}? and wildcard *.
+ * ponytail: Hono lowercases header names via Fetch Headers; header schemas
+ * must use lowercase keys (documented guidance). Edge path characters (//, *)
+ * are normalized deterministically — * becomes {wildcard}.
+ */
+function toOapiPath(path) {
+    let out = path.replace(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?\??/g, "{$1}");
+    out = out.replace(/\*/g, "{wildcard}");
+    return out;
 }
 /** Type guard: JsonSchema with type "object". */
 function isObjectSchema(json) {
@@ -268,8 +276,11 @@ export class OpenAPIHono extends Hono {
     /** Register an API endpoint with ArkType validation and OpenAPI metadata. */
     openapi(config, handler) {
         const method = normalizeMethod(config.method);
+        if (!config.path.startsWith("/")) {
+            throw new Error(`Path must start with "/": ${config.path}`);
+        }
         const oapiPath = toOapiPath(config.path);
-        const paramNames = [...config.path.matchAll(/:(\w+)/g)].map((m) => m[1]);
+        const paramNames = [...config.path.matchAll(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?\??/g)].map((m) => m[1]);
         // Build middlewares from request schemas
         const mws = [];
         if (config.request?.params) {
@@ -345,10 +356,25 @@ export class OpenAPIHono extends Hono {
     // --- Spec building ---
     async _buildSpec(config) {
         const paths = {};
+        const seenOperationIds = new Set();
+        const baseCounts = new Map();
         for (const route of this._routes) {
             const pathItem = paths[route.oapiPath] ?? {};
+            const baseId = `${route.method}_${route.oapiPath.replace(/[{}]/g, "").replace(/\//g, "_").replace(/\*/g, "wildcard")}`;
+            let operationId = baseId;
+            if (seenOperationIds.has(operationId)) {
+                let n = (baseCounts.get(baseId) ?? 1) + 1;
+                while (seenOperationIds.has(`${baseId}_${n}`))
+                    n++;
+                operationId = `${baseId}_${n}`;
+                baseCounts.set(baseId, n);
+            }
+            else {
+                baseCounts.set(baseId, 1);
+            }
+            seenOperationIds.add(operationId);
             const op = {
-                operationId: `${route.method}_${route.oapiPath.replace(/[{}]/g, "").replace(/\//g, "_")}`,
+                operationId,
                 responses: await this._buildResponses(route.config),
             };
             if (route.config.tags)
@@ -438,14 +464,14 @@ export class OpenAPIHono extends Hono {
         // Framework-guaranteed error responses (zero-config, share one schema component)
         // 400 Bad Request — any endpoint with validated body/query/headers/params
         // 401 Unauthorized — any endpoint behind a registered auth scheme
-        const errorSchema = type({ error: "string" });
+        const errorRef = await this._getErrorSchemaRef();
         const addFrameworkError = async (code, description) => {
             const key = String(code);
             if (!responses[key]) {
                 responses[key] = {
                     description,
                     content: {
-                        "application/json": { schema: await this._schemaToOA(errorSchema) },
+                        "application/json": { schema: errorRef },
                     },
                 };
             }
@@ -466,7 +492,7 @@ export class OpenAPIHono extends Hono {
         // by declaring an explicit 404 response, which the guard above (`!responses[key]`)
         // respects. False positives (documenting 404 on endpoints that never throw it) are
         // benign spec noise.
-        if (!responses["404"] && config.path.match(/:(\w+)/)) {
+        if (!responses["404"] && config.path.match(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?\??/)) {
             await addFrameworkError(404, "Not Found");
         }
         // Default 500 (if not already declared by the user)
@@ -474,11 +500,26 @@ export class OpenAPIHono extends Hono {
             responses["500"] = {
                 description: "Internal Server Error",
                 content: {
-                    "application/json": { schema: await this._schemaToOA(errorSchema) },
+                    "application/json": { schema: errorRef },
                 },
             };
         }
         return responses;
+    }
+    _errorSchemaRef = null;
+    async _getErrorSchemaRef() {
+        if (this._errorSchemaRef)
+            return this._errorSchemaRef;
+        const errorSchema = type({ error: "string" });
+        const json = errorSchema.toJsonSchema();
+        delete json.$schema;
+        const hash = await sha1Hex(JSON.stringify(json));
+        const name = `schema_${hash}`;
+        if (!this._components.schemas.has(name)) {
+            this._components.schemas.set(name, json);
+        }
+        this._errorSchemaRef = { $ref: `#/components/schemas/${name}` };
+        return this._errorSchemaRef;
     }
     /**
      * Convert an ArkType schema → OpenAPI Schema Object.
@@ -529,8 +570,12 @@ export class OpenAPIHono extends Hono {
         for (const [name, prop] of Object.entries(json.properties)) {
             if (!prop)
                 continue;
+            // ponytail: Hono's c.req.header() lowercases via Fetch Headers; spec
+            // emits lowercase header param names so runtime and docs match. Users
+            // should declare header schemas with lowercase keys.
+            const paramName = inLocation === "header" ? name.toLowerCase() : name;
             const param = {
-                name,
+                name: paramName,
                 in: inLocation,
                 required: required.has(name),
                 schema: prop,

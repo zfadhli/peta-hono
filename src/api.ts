@@ -1,7 +1,13 @@
 import { apiReference } from "@scalar/hono-api-reference";
 import { type Type, type } from "arktype";
 import type { Context, MiddlewareHandler } from "hono";
-import { APIError, type AuthScheme, createErrorHandler, OpenAPIHono } from "./openapi.js";
+import {
+  APIError,
+  type AuthScheme,
+  createErrorHandler,
+  normalizeMethod,
+  OpenAPIHono,
+} from "./openapi.js";
 
 // Re-export AuthScheme so consumers can import it from api.ts as before
 export type { AuthScheme };
@@ -30,11 +36,18 @@ type AnyArkType = Type<any, any>;
 /** Extract the inferred output type from an ArkType instance. */
 type ArkInfer<T> = T extends { infer: infer I } ? I : never;
 
-/** Extract `:name` tokens from a Hono-style path. */
+/** Strip regex `{...}` and optional `?` suffix from a param token. */
+type StripParam<S extends string> = S extends `${infer Name}{${string}}`
+  ? StripParam<Name>
+  : S extends `${infer Name}?`
+    ? Name
+    : S;
+
+/** Extract `:name` tokens from a Hono-style path (handles :name, :name{regex}, :name?, etc.). */
 type PathParam<P extends string> = P extends `${string}:${infer Param}/${infer Rest}`
-  ? Param | PathParam<Rest>
+  ? StripParam<Param> | PathParam<`/${Rest}`>
   : P extends `${string}:${infer Param}`
-    ? Param
+    ? StripParam<Param>
     : never;
 
 /** Build `{ name: string }` from a path like `/hello/:name`. */
@@ -153,16 +166,14 @@ export function createApi<Auth = undefined>(
     config: RouteFields<P, B, Q, H> & { auth?: string },
     handler: (req: ReqFor<P, B, Q, H> & { auth: Auth }) => Promise<any> | any,
   ) {
-    // Normalize method to lowercase (accept 'GET' or 'get')
-    const raw = config.method.toLowerCase();
-    if (!["get", "post", "put", "patch", "delete"].includes(raw)) {
-      throw new Error(
-        `api(): method '${config.method}' is not supported. Use one of: GET, POST, PUT, PATCH, DELETE`,
-      );
-    }
-    const method = raw.toUpperCase() as "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    // Method normalization is case-insensitive and uses the single
+    // normalizeMethod helper (same message as OpenAPIHono) for consistency.
+    const normalized = normalizeMethod(config.method);
+    const method = normalized.toUpperCase() as "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-    const paramNames = [...config.path.matchAll(/:(\w+)/g)].map((m) => m[1]!);
+    const paramNames = [...config.path.matchAll(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?\??/g)].map(
+      (m) => m[1]!,
+    );
 
     // Build request schemas
     const request: {
