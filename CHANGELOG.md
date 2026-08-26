@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-08-26
+
+### Fixed
+
+- Public barrel now re-exports `normalizeMethod` as documented in 0.5.0 — `import { normalizeMethod } from "peta-hono"` works in dev (`bundler`) and `dist` (`NodeNext`), case-insensitive `GET`/`get`/`Get` → `get`, throws `Unsupported method: X. Use one of: GET, POST, PUT, PATCH, DELETE`. Closes #17, spec #16.
+
+### Changed
+
+- Header `ArkType` keys MUST be lowercase — `type({ "x-api-key": "string" })` validates and emits `OpenAPIParameter { name: "x-api-key", in: "header" }` via `_addObjectParams` `name.toLowerCase()`; mixed-case `X-Api-Key` reliably 400s via single `ErrorHandler` chokepoint; wire `X-Custom-Token` still satisfies lowercase schema (Hono lowercases via Fetch `Headers`); `coerceDeep` does not auto-lowercase; path/query casing preserved. `Ponytail` relocated from `toOapiPath` to `_addObjectParams`. Closes #17.
+- Routing grammar single source — `src/paths.ts` canonical for `PARAM_TOKEN_RE`/`PARAM_HAS_RE`/`parseParamTokens`/`hasParamTokens`/`normalizeMethod`/`toOapiPath`/`SUPPORTED_METHODS` per ADR-010; `src/api.ts` + `src/openapi.ts` import rather than duplicate; barrel re-export chain `paths → openapi → index` stable for `Method`/`HttpMethod`/`normalizeMethod`.
+- Docs — `README` How it works + Features and `AGENTS` Key patterns each document header lowercase invariant + barrel `normalizeMethod` import; `docs/glossary.md` adds `Method / HttpMethod / normalizeMethod` and amends `Coercion`/`OapiPath`/`Ponytail`; `docs/domain-model.md` §1/§4 marks `src/paths.ts` canonical and header `parameters[]` invariant; ADRs 001–011 added. Closes #18, spec #16.
+- Deterministic spec emission unchanged — no `#/$defs/` leakage, no `Spec snapshot` regeneration required.
+
 ## [0.5.0] - 2026-08-26
 
 ### Added
