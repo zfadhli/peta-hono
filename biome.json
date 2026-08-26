@@ -10,6 +10,14 @@
 		"ignoreUnknown": false,
 		"includes": ["**"]
 	},
+	"overrides": [
+		{
+			"includes": ["examples/blog/spec.snapshot.json"],
+			"formatter": { "enabled": false },
+			"linter": { "enabled": false },
+			"assist": { "enabled": false }
+		}
+	],
 	"formatter": {
 		"enabled": true,
 		"indentStyle": "space",

@@ -1,7 +1,7 @@
 pre-commit:
   commands:
     lint:
-      run: nubx -y @biomejs/biome check --write --unsafe src/
+      run: nubx -y @biomejs/biome check --write --unsafe src/ examples/
       stage_fixed: true
     typecheck:
       run: nub run typecheck

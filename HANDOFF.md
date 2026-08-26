@@ -12,20 +12,26 @@ Hardening v0.5.0 — deterministic spec emission, controllable error responses, 
 
 ## Changes
 
-- Verified issues 05, 06, 07 against live codebase and `app.request` seams (2026-08-26)
+- Verified issues 05, 06 originally done (fd3c2d9, b6354f3) and implemented pending 07 hygiene (2026-08-26)
 
 ## Files Touched
 
 | File | Status | Done | Left |
 |------|--------|------|------|
 | `src/openapi.ts` | verified | 05 deterministic emission (fd3c2d9 + 38b4774) + 06 controllable errors (b6354f3) intact — `toOapiPath`, `normalizeMethod`, stable `schema_<12hex>` hoisting, deduped error component, 400/401/404/500 guards, `404` ponytail with `documentNotFound` ceiling | None |
-| `examples/blog/spec.snapshot.json` | verified | Paths `/{param}` + `404` on 6 param routes present | None |
-| `package.json` | verified | `0.4.0` — `check:all` still `src+blog+basic` (no `auth`), `lint` still `src/`-only | `auth` missing from `check:all`, lint scope mismatch — tracked in 07 |
+| `examples/blog/spec.snapshot.json` | verified | Paths `/{param}` + `404` on 6 param routes present (excluded from Biome via overrides) | None |
+| `package.json` | modified | `check:all` now `lib+blog+basic+auth`, `lint`/`lint:fix`/`format` now `src/ examples/` | None |
+| `pnpm-workspace.yaml` | fixed | `allowBuilds: '@evilmartians/lefthook': true` (was placeholder string) | None |
+| `lefthook.yml` | fixed | `biome check --write --unsafe src/ examples/` (was `src/`-only) | None |
+| `biome.json` | modified | Added `overrides` to exclude `spec.snapshot.json` from formatter/linter/assist | None |
+| `examples/*` (14 files) | formatted | Biome `check --write --unsafe` — import sort, 2-space, double-quotes, template literal, unused `_j7` | None |
+| `AGENTS.md` | modified | Documented `bundler` vs `NodeNext` tsconfig duality, `docs()` mount order + singleton, auth-guarded docs recipe | None |
+| `README.md` | modified | Added `docs()` mount order, auth-guarded docs recipe, `TypeScript config` section | None |
 | `CHANGELOG.md` | verified | `[0.4.0]` present | None |
 | `.scratch/hardening-v0.5.0/issues/05-deterministic-openapi-spec-emission.md` | updated | Marked `done` (fd3c2d9 / 38b4774) | None |
 | `.scratch/hardening-v0.5.0/issues/06-controllable-framework-error-responses.md` | updated | Marked `done` (b6354f3) | None |
-| `.scratch/hardening-v0.5.0/issues/07-lint-ci-docs-hygiene.md` | verified | Still `ready-for-agent` — `biome`/`lefthook` `src/`-only, `check:all` missing `auth`, `pnpm-workspace.yaml` `allowBuilds` placeholder, `tsconfig` `bundler` vs `NodeNext` not reconciled | Remains open |
-| `HANDOFF.md` | modified | Updated for this verification session | None |
+| `.scratch/hardening-v0.5.0/issues/07-lint-ci-docs-hygiene.md` | updated | Marked `done` (all 4 checklist items) | None |
+| `HANDOFF.md` | modified | Updated for implementation session | None |
 
 ## Key Decisions
 
@@ -43,16 +49,16 @@ Hardening v0.5.0 — deterministic spec emission, controllable error responses, 
 
 ## Verification (2026-08-26)
 
-- **05 deterministic spec emission:** `nub run typecheck` ✓, `nub run check:all` (6/6 lib + 41 blog + basic) ✓, `/openapi.json` → `/{param}` for `:id`/`:name{regex}`/`/*`→`/{wildcard}`, `operationId` collision-free (`_2`), `minimum`/`maximum`/`integer` preserved, `$defs` hoisted to `schema_<12hex>`, no `#/$defs/`, `header` lowercasing (`X-Token`→`x-token`), `normalizeMethod` case-insensitive, `GET /docs` 200 `Scalar` ✓
+- **05 deterministic spec emission:** `nub run typecheck` ✓, `nub run check:all` (6/6 lib + 41 blog + basic + auth) ✓, `/openapi.json` → `/{param}` for `:id`/`:name{regex}`/`/*`→`/{wildcard}`, `operationId` collision-free (`_2`), `minimum`/`maximum`/`integer` preserved, `$defs` hoisted to `schema_<12hex>`, no `#/$defs/`, `header` lowercasing (`X-Token`→`x-token`), `normalizeMethod` case-insensitive, `GET /docs` 200 `Scalar` ✓
 - **06 controllable errors:** `/health`→`200,500` no `400/404`, `/things` (body)→`201,400,500` no `404`, `/items/{id}` (param)→`200,400,404,500`, explicit `responses:{404}` suppresses heuristic, `401` only with `security`/`AuthScheme`, single deduped `{error:string}` component (`schema_84c5e…`), `ponytail`+`documentNotFound` ceiling ✓
-- **07 lint/CI/docs (NOT done):** `nub run lint` passes for `src/` but `biome check src/ examples/` → 22 errors; `lefthook.yml` `src/`-only; `check:all` missing `examples/auth/selfcheck.ts` (session cookie-jar flow); `pnpm-workspace.yaml` still placeholder `set this to true or false`; `tsconfig.json` `bundler` vs `tsconfig.build.json` `NodeNext` (+ `.js` ESM) undocumented
+- **07 lint/CI/docs (DONE):** `nub run lint` (`src/ examples/` with snapshot override) ✓, `nub run typecheck` ✓, `nub run check:all` (lib+basic+blog+auth) ✓, `GET /docs` 200 `Scalar` ✓, `pnpm-workspace.yaml` valid, `tsconfig` `bundler` vs `NodeNext` documented in `AGENTS.md`+`README.md`, `docs()` mount order + singleton + auth-guarded recipe documented
 
 ## Next Steps
 
-- [x] 05 marked done
-- [x] 06 marked done
-- [ ] 07 remains `ready-for-agent` — fix `biome`/`lefthook` scope, `allowBuilds`, `check:all` + `auth`, reconcile `tsconfig` docs, then re-verify `nub run lint` + `typecheck` + `check:all` green + `GET /docs` `Scalar`
-- [ ] v0.4.0 ready to publish (`nub ci && npm publish`) — `dist/` already fresh (`nub run build` → no diff)
+- [x] 05 marked done (fd3c2d9 / 38b4774)
+- [x] 06 marked done (b6354f3)
+- [x] 07 marked done — `biome`/`lefthook` now `src/ examples/`, `check:all` + `auth`, `allowBuilds` fixed, `tsconfig` documented, `docs()` recipe documented, all green
+- [ ] v0.4.0 ready to publish (`nub ci && npm publish`) — run `nub run build` + `nub run check:dist` to confirm `dist/` fresh before publish
 - [ ] Potential next features: `errors: [403, 404]` config field for explicit error-code docs without full schemas; response status override; route-level tags.
 
 ## Suggested Skills

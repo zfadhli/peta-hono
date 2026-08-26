@@ -157,9 +157,32 @@ serve(app)
 
 **Route import order matters** when you have overlapping paths — Hono matches routes in registration order. List the most specific routes before the less specific ones (`/posts/latest` before `/posts/:id`).
 
+**`docs()` mount order:** `docs()` must be called **after** all route imports — routes register via side-effect `api()` calls on the shared `app` from `setup.ts`. The `setup.ts` singleton (`createApi()` once, export `{ api, auth, docs, app }`) is the protectable pattern for multi-file apps.
+
+**Protecting docs (auth-guarded recipe):** Default `docs()` is unauthenticated (`ponytail: no auth on docs — protect it in production if needed`). For private APIs, guard the spec and UI with auth middleware *before* mounting:
+
+```ts
+// examples/blog/index.ts — auth-guarded variant
+import './posts.js'
+import './comments.js'
+import { docs, app } from './setup.js'
+import { authMiddleware } from './auth.js'
+
+app.use('/openapi.json', authMiddleware)
+app.use('/docs/*', authMiddleware)
+docs() // now requires auth
+serve(app)
+```
+
 Run with:
 
 ```bash
 nub examples/blog/index.ts
 ```
+
+## TypeScript config
+
+- **Dev (`nub file.ts`):** `tsconfig.json` uses `moduleResolution: "bundler"` — Nub resolves `.js` imports to `.ts` sources, so `import './posts.js'` works in dev without a build step.
+- **Build (`nub run build`):** `tsconfig.build.json` uses `moduleResolution: "NodeNext"` — preserves `.js` ESM imports in `dist/` for the published artifact (Node, Bun, Cloudflare). Both configs enable `strict` + `noUncheckedIndexedAccess`.
+- Imports always use `.js` extensions — works in both runtimes via Nub (dev) and NodeNext (build).
 

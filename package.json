@@ -36,12 +36,12 @@
     "check": "nub examples/basic/selfcheck.ts",
     "blog": "nub examples/blog/index.ts",
     "blog:check": "nub examples/blog/selfcheck.ts",
-    "check:all": "nub src/openapi.selfcheck.ts && nub examples/basic/selfcheck.ts && nub examples/blog/selfcheck.ts",
+    "check:all": "nub src/openapi.selfcheck.ts && nub examples/basic/selfcheck.ts && nub examples/blog/selfcheck.ts && nub examples/auth/selfcheck.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check src/",
-    "lint:fix": "biome check --write src/",
-    "format": "biome format src/",
-    "format:fix": "biome format --write src/",
+    "lint": "biome check src/ examples/",
+    "lint:fix": "biome check --write --unsafe src/ examples/",
+    "format": "biome format src/ examples/",
+    "format:fix": "biome format --write src/ examples/",
     "test": "nub run check:all"
   },
   "peerDependencies": {

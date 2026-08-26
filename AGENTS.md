@@ -21,13 +21,14 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 | Run example | `nub examples/basic/index.ts` |
 | Run blog | `nub examples/blog/index.ts` |
 | Typecheck | `nub run typecheck` |
-| Lint | `nub run lint` |
+| Lint | `nub run lint` (covers `src/` + `examples/`, snapshot excluded via `biome.json` overrides) |
 | Lint auto-fix | `nub run lint:fix` |
 | Format check | `nub run format` |
 | Example tests | `nub examples/basic/selfcheck.ts` |
 | Blog tests | `nub examples/blog/selfcheck.ts` |
+| Auth tests | `nub examples/auth/selfcheck.ts` |
 | Lib tests | `nub src/openapi.selfcheck.ts` |
-| All tests | `nub src/openapi.selfcheck.ts && nub examples/basic/selfcheck.ts && nub examples/blog/selfcheck.ts` |
+| All tests | `nub run check:all` (`lib + basic + blog + auth`) |
 
 ## Structure
 
@@ -47,6 +48,8 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 - `ponytail:` comments mark deliberate simplifications with ceiling/upgrade path
 - No test framework — selfcheck.ts files are runnable integration tests
 - TypeScript strict mode, noUncheckedIndexedAccess
+- Lint/format via Biome covers `src/` + `examples/` (lefthook pre-commit + `biome.json` overrides exclude `examples/blog/spec.snapshot.json` which is a generated golden file)
+- TypeScript module resolution: `tsconfig.json` uses `bundler` for `nub file.ts` dev (Nub resolves `.js` → `.ts`); `tsconfig.build.json` uses `NodeNext` for `dist/` build (preserves `.js` ESM imports for published artifact). Both target `ESNext`/`ES2022` with `strict` + `noUncheckedIndexedAccess`.
 
 ## Key patterns
 
@@ -59,4 +62,12 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 - All errors — handler-thrown `APIError`, validator failures, unexpected throws — route through `app.onError` (single chokepoint). `OpenAPIHono` registers a default `onError`; `createApi()` overrides it with its own policy
 - `arktypeValidator` throws `APIError(400, summary)` on validation failure (does not return a `Response`) so `onError` sees validation errors
 - Route import order matters for overlapping paths — more specific routes first
+- `docs()` must be called **after** all route imports (route files register via side-effect `api()` calls on the shared `app` from `setup.ts`). The `setup.ts` singleton (`createApi()` once, export `{ api, auth, docs, app }`) is the protectable pattern for multi-file apps.
+- Default `docs()` is unauthenticated (`ponytail: no auth on docs — protect it in production if needed` in `examples/basic/routes.ts`). For private APIs, guard docs with auth middleware before mounting:
+  ```ts
+  // auth-guarded docs — mount only for authenticated users
+  app.use('/docs/*', authMiddleware)
+  app.use('/openapi.json', authMiddleware)
+  docs()
+  ```
 - To update the blog spec snapshot: `rm examples/blog/spec.snapshot.json && nub examples/blog/selfcheck.ts`
