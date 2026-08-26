@@ -1,7 +1,8 @@
 import { type Type } from "arktype";
 import type { Context, Env, MiddlewareHandler } from "hono";
-import { APIError, type AuthScheme, type Method, OpenAPIHono } from "./openapi.js";
-export type { HttpMethod, Method } from "./openapi.js";
+import { APIError, type AuthScheme, OpenAPIHono } from "./openapi.js";
+import { type Method } from "./paths.js";
+export type { HttpMethod, Method } from "./paths.js";
 export type { AuthScheme };
 export { APIError };
 export declare const fail: {

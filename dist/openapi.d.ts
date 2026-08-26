@@ -3,6 +3,7 @@ import type { Context, Env, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { Schema } from "hono/types";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import type { Method } from "./paths.js";
 /** Any ArkType type instance — has toJsonSchema() and is callable for validation. */
 export type ArkType = Type<any, any>;
 export type AuthScheme = {
@@ -47,11 +48,8 @@ export declare class APIError extends Error {
     status: ContentfulStatusCode;
     constructor(status: ContentfulStatusCode, message: string);
 }
-declare const SUPPORTED_METHODS: readonly ["GET", "POST", "PUT", "PATCH", "DELETE"];
-export type HttpMethod = (typeof SUPPORTED_METHODS)[number];
-/** Method string accepted by api() — supports any casing, autocomplete for known methods. */
-export type Method = HttpMethod | Lowercase<HttpMethod> | (string & {});
-export declare function normalizeMethod(m: string): string;
+export type { HttpMethod, Method, ParamToken } from "./paths.js";
+export { hasParamTokens, normalizeMethod, PARAM_HAS_RE, PARAM_TOKEN_RE, parseParamTokens, SUPPORTED_METHODS, toOapiPath, } from "./paths.js";
 /**
  * Create a Hono validator middleware from an ArkType schema.
  * Coerces strings → numbers/booleans (deep, element-wise for arrays and nested objects)
@@ -87,5 +85,4 @@ export declare class OpenAPIHono<E extends Env = Env, S extends Schema = Schema,
     /** Walk an ArkType object schema and produce OpenAPI parameter objects. */
     private _addObjectParams;
 }
-export {};
 //# sourceMappingURL=openapi.d.ts.map

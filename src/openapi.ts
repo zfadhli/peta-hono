@@ -4,6 +4,8 @@ import { Hono } from "hono";
 import type { Schema } from "hono/types";
 import type { ContentfulStatusCode, StatusCode } from "hono/utils/http-status";
 import { validator } from "hono/validator";
+import type { Method } from "./paths.js";
+import { hasParamTokens, normalizeMethod, parseParamTokens, toOapiPath } from "./paths.js";
 
 // --- Web Crypto helpers ---
 
@@ -159,32 +161,18 @@ interface ComponentRegistry {
 
 // --- Helpers ---
 
-const SUPPORTED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
-
-export type HttpMethod = (typeof SUPPORTED_METHODS)[number];
-/** Method string accepted by api() — supports any casing, autocomplete for known methods. */
-export type Method = HttpMethod | Lowercase<HttpMethod> | (string & {});
-
-export function normalizeMethod(m: string): string {
-  const lower = m.toLowerCase();
-  if (!(SUPPORTED_METHODS as readonly string[]).map((s) => s.toLowerCase()).includes(lower)) {
-    throw new Error(`Unsupported method: ${m}. Use one of: ${SUPPORTED_METHODS.join(", ")}`);
-  }
-  return lower;
-}
-
-/**
- * Convert Hono-style /:param → OpenAPI 3.0 /{param} for all Hono token shapes.
- * Handles :name, :name{regex}, :name?, :name{regex}? and wildcard *.
- * ponytail: Hono lowercases header names via Fetch Headers; header schemas
- * must use lowercase keys (documented guidance). Edge path characters (//, *)
- * are normalized deterministically — * becomes {wildcard}.
- */
-function toOapiPath(path: string): string {
-  let out = path.replace(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?\??/g, "{$1}");
-  out = out.replace(/\*/g, "{wildcard}");
-  return out;
-}
+export type { HttpMethod, Method, ParamToken } from "./paths.js";
+// Path & method grammar lives in src/paths.ts — single source per ADR-010.
+// Re-export for barrel stability: consumers may import { Method, normalizeMethod } from "./openapi.js"
+export {
+  hasParamTokens,
+  normalizeMethod,
+  PARAM_HAS_RE,
+  PARAM_TOKEN_RE,
+  parseParamTokens,
+  SUPPORTED_METHODS,
+  toOapiPath,
+} from "./paths.js";
 
 /** Type guard: JsonSchema with type "object". */
 function isObjectSchema(json: JsonSchema): json is JsonSchema.Object {
@@ -406,9 +394,7 @@ export class OpenAPIHono<
       throw new Error(`Path must start with "/": ${config.path}`);
     }
     const oapiPath = toOapiPath(config.path);
-    const paramTokens = [...config.path.matchAll(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?(\?)?/g)].map(
-      (m) => ({ name: m[1]!, optional: !!m[2] }),
-    );
+    const paramTokens = parseParamTokens(config.path);
 
     // Build middlewares from request schemas
     const mws: MiddlewareHandler[] = [];
@@ -638,7 +624,7 @@ export class OpenAPIHono<
         !!config.request?.query ||
         !!config.request?.headers ||
         !!config.request?.params ||
-        /:([a-zA-Z0-9_]+)(?:\{[^}]+\})?\??/.test(config.path);
+        hasParamTokens(config.path);
       if (hasValidation) {
         await addFrameworkError(400, "Bad Request");
       }
@@ -654,7 +640,7 @@ export class OpenAPIHono<
     // Ceiling: heuristic covers ~95% of resource routes. Upgrade: add an explicit
     // `documentNotFound` opt-in or `responses: {404: schema}` when false positives matter
     // or 404 needs a custom schema.
-    if (!responses["404"] && config.path.match(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?\??/)) {
+    if (!responses["404"] && hasParamTokens(config.path)) {
       await addFrameworkError(404, "Not Found");
     }
 

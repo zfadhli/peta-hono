@@ -1,16 +1,10 @@
 import { apiReference } from "@scalar/hono-api-reference";
 import { type Type, type } from "arktype";
 import type { Context, Env, MiddlewareHandler } from "hono";
-import {
-  APIError,
-  type AuthScheme,
-  createErrorHandler,
-  type Method,
-  normalizeMethod,
-  OpenAPIHono,
-} from "./openapi.js";
+import { APIError, type AuthScheme, createErrorHandler, OpenAPIHono } from "./openapi.js";
+import { type Method, normalizeMethod, parseParamTokens } from "./paths.js";
 
-export type { HttpMethod, Method } from "./openapi.js";
+export type { HttpMethod, Method } from "./paths.js";
 // Re-export AuthScheme so consumers can import it from api.ts as before
 export type { AuthScheme };
 // Re-export APIError (defined in openapi.ts) so the public barrel keeps a
@@ -190,9 +184,7 @@ export function createApi<Auth = undefined, E extends Env = Env>(
     const normalized = normalizeMethod(config.method);
     const method = normalized.toUpperCase() as "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-    const paramTokens = [...config.path.matchAll(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?(\?)?/g)].map(
-      (m) => ({ name: m[1]!, optional: !!m[2] }),
-    );
+    const paramTokens = parseParamTokens(config.path);
 
     // Build request schemas
     const request: {
@@ -289,11 +281,16 @@ export function createApi<Auth = undefined, E extends Env = Env>(
       config: RouteFieldsWithoutMethodPath<P, B, Q, H> & { auth?: string },
       handler: (req: ReqFor<P, B, Q, H, E> & { auth: Auth }) => Promise<any> | any,
     ): void {
-      (api as any)(
-        { ...config, method: method as string, path } as RouteFields<P, B, Q, H> & {
+      // ponytail: cast to impl signature — overloads stay strict outside, one handler cast for Auth distribution
+      const apiImpl = api as unknown as (
+        config: RouteFields<P, B, Q, H> & { auth?: string },
+        handler: (req: ReqFor<P, B, Q, H, E> & { auth: Auth }) => any,
+      ) => void;
+      apiImpl(
+        { ...config, method, path } as RouteFields<P, B, Q, H> & {
           auth?: string;
         },
-        handler as any,
+        handler as (req: ReqFor<P, B, Q, H, E> & { auth: Auth }) => Promise<any> | any,
       );
     }
     return helper;

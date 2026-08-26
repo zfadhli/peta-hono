@@ -1,6 +1,7 @@
 import { apiReference } from "@scalar/hono-api-reference";
 import { type } from "arktype";
-import { APIError, createErrorHandler, normalizeMethod, OpenAPIHono, } from "./openapi.js";
+import { APIError, createErrorHandler, OpenAPIHono } from "./openapi.js";
+import { normalizeMethod, parseParamTokens } from "./paths.js";
 // Re-export APIError (defined in openapi.ts) so the public barrel keeps a
 // stable shape via api.ts. See issue #4: APIError moved to openapi.ts so the
 // validator can throw it without a circular import.
@@ -75,7 +76,7 @@ export function createApi(opts = {}) {
         // normalizeMethod helper (same message as OpenAPIHono) for consistency.
         const normalized = normalizeMethod(config.method);
         const method = normalized.toUpperCase();
-        const paramTokens = [...config.path.matchAll(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?(\?)?/g)].map((m) => ({ name: m[1], optional: !!m[2] }));
+        const paramTokens = parseParamTokens(config.path);
         // Build request schemas
         const request = {};
         if (paramTokens.length > 0) {
@@ -124,7 +125,9 @@ export function createApi(opts = {}) {
     // --- Method shorthands: api.get(path, config, handler) etc. ---
     function makeMethodHelper(method) {
         function helper(path, config, handler) {
-            api({ ...config, method: method, path }, handler);
+            // ponytail: cast to impl signature — overloads stay strict outside, one handler cast for Auth distribution
+            const apiImpl = api;
+            apiImpl({ ...config, method, path }, handler);
         }
         return helper;
     }

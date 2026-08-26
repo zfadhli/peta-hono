@@ -102,6 +102,7 @@ Run with `nub index.ts` (or `node index.ts` if you've built the lib).
   - `status?: number` — explicit success status (use 204 for No Content; handler returns `null`)
 - **`auth(name, middleware, scheme?)`** — registers a named auth middleware. **Return-based:** `(c: Context<Env>) => Auth` — throw to reject (e.g. `throw fail.unauthorized()`), or return a value that becomes `req.auth` in handlers. Apply via `{ auth: 'name' }` in the api config. Optional `scheme` registers an OpenAPI security scheme (adds lock icon in docs): `{ type: 'http', scheme: 'bearer' }`, `{ type: 'http', scheme: 'basic' }`, or `{ type: 'apiKey', in: 'header', name: 'X-API-Key' }`.
 - **`docs(specPath?, uiPath?)` / `docs({ specPath?, uiPath? })`** — mounts the OpenAPI JSON spec and Scalar docs UI. Both positional (`docs("/openapi.json", "/docs")`) and options-object (`docs({ specPath, uiPath })`) forms are supported.
+- **Header schemas must use lowercase keys** — Hono lowercases incoming headers via Fetch `Headers`; declare `type({ "x-api-key": "string" })` not `type({ "X-Api-Key": "string" })`. The spec emits lowercased header param names so runtime and docs match (`_addObjectParams` lowercases when `in === "header"`).
 - **`fail` / `errors` / `httpErrors`** — throw named HTTP errors: `throw fail.notFound('post not found')`. Aliases `errors` and `httpErrors` are re-exports of `fail` for callers preferring noun forms. Helpers for common codes: `fail.badRequest` (400), `fail.unauthorized` (401), `fail.forbidden` (403), `fail.notFound` (404), `fail.conflict` (409), `fail.unprocessableEntity` (422), `fail.tooManyRequests` (429), `fail.internalServerError` (500), `fail.badGateway` (502), `fail.serviceUnavailable` (503), `fail.gatewayTimeout` (504). Each accepts an optional message (sensible default if omitted). For custom status codes, use `throw new APIError(status, message)` directly.
 
 Handler returns a plain object (no `c.json()`). The library wraps it in the correct response. Return `null` for 204 No Content.
@@ -114,7 +115,8 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
 - Auth middleware — named, reusable, applied per-endpoint, with OpenAPI security schemes
 - **Typed auth context** — `createApi<Auth, Env>()` + return-based `auth()` middleware propagate the authenticated user to handlers as `req.auth` with full type safety; `Env` types `req.c` (`c.var` / `c.env`)
 - **`fail` error helpers** — `throw fail.notFound('...')` for ergonomic typed HTTP errors (11 named status helpers + `APIError` for custom codes; also available as `errors` / `httpErrors`)
-- Method shorthands — `api.get`, `api.post`, `api.put`, `api.patch`, `api.delete`/`api.del` with full type inference, mirroring Hono idioms; `method` typed as `Method` with case-insensitive handling
+- Method shorthands — `api.get`, `api.post`, `api.put`, `api.patch`, `api.delete`/`api.del` with full type inference, mirroring Hono idioms; `method` typed as `Method` with case-insensitive handling via `normalizeMethod` (`GET`/`get`/`Get` all work, `import { normalizeMethod } from "peta-hono"`)
+- Header lowercasing — header param names are lowercased in spec and runtime to match Hono's Fetch-Header behavior; declare header schemas with lowercase keys
 - OpenAPI `operationId` / `deprecated` / tags / summary / description for doc grouping and SDK generation
 - `docs()` options-object form — `docs({ specPath, uiPath })` alongside positional args
 - 204 No Content support — handler returns `null`

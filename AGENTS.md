@@ -70,4 +70,6 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
   app.use('/openapi.json', authMiddleware)
   docs()
   ```
+- Header schemas must use lowercase keys — Hono's `c.req.header()` lowercases via Fetch `Headers`; `_addObjectParams` emits `name.toLowerCase()` when `in === "header"` so spec and runtime match. Declare `type({ "x-api-key": "string" })` not `"X-Api-Key"` (ponytail: ceiled — `coerceDeep` does not auto-lowercase; strict fail-fast 400 if you use uppercase).
+- `normalizeMethod` is public — `import { normalizeMethod } from "peta-hono"` (re-exported via `src/openapi.ts` from `src/paths.ts` single source, case-insensitive `GET`/`get`/`Get` → `"get"`, throws `Unsupported method` otherwise). `Method`/`HttpMethod` types are also re-exported from the barrel for `method` autocomplete.
 - To update the blog spec snapshot: `rm examples/blog/spec.snapshot.json && nub examples/blog/selfcheck.ts`
