@@ -14,7 +14,7 @@ export type AuthScheme = {
     name: string;
 };
 export interface RouteConfig {
-    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    method: Method;
     path: string;
     request?: {
         body?: ArkType;
@@ -29,6 +29,10 @@ export interface RouteConfig {
     security?: Record<string, string[]>[];
     middleware?: MiddlewareHandler[];
     status?: number;
+    /** Override auto-generated operationId (useful for SDK generation). */
+    operationId?: string;
+    /** Mark operation as deprecated in OpenAPI docs. */
+    deprecated?: boolean;
 }
 /** Single error policy — shared by OpenAPIHono and createApi (via createErrorHandler). */
 export type ErrorHandler = (err: Error, c: Context) => Response | Promise<Response>;
@@ -43,6 +47,10 @@ export declare class APIError extends Error {
     status: ContentfulStatusCode;
     constructor(status: ContentfulStatusCode, message: string);
 }
+declare const SUPPORTED_METHODS: readonly ["GET", "POST", "PUT", "PATCH", "DELETE"];
+export type HttpMethod = (typeof SUPPORTED_METHODS)[number];
+/** Method string accepted by api() — supports any casing, autocomplete for known methods. */
+export type Method = HttpMethod | Lowercase<HttpMethod> | (string & {});
 export declare function normalizeMethod(m: string): string;
 /**
  * Create a Hono validator middleware from an ArkType schema.

@@ -15,7 +15,14 @@ export const fail = {
     unprocessableEntity: (msg = "Unprocessable Entity") => new APIError(422, msg),
     tooManyRequests: (msg = "Too Many Requests") => new APIError(429, msg),
     internalServerError: (msg = "Internal Server Error") => new APIError(500, msg),
+    badGateway: (msg = "Bad Gateway") => new APIError(502, msg),
+    serviceUnavailable: (msg = "Service Unavailable") => new APIError(503, msg),
+    gatewayTimeout: (msg = "Gateway Timeout") => new APIError(504, msg),
 };
+/** Alias for `fail` — noun form for callers who prefer `throw errors.notFound()`. */
+export const errors = fail;
+/** Alias for `fail` — explicit HTTP error helpers. */
+export const httpErrors = fail;
 // --- Create the API builder ---
 /**
  * Create an Encore-style API builder on top of Hono + OpenAPI.
@@ -29,10 +36,14 @@ export const fail = {
  *   return { user: { id: 'alice' } }   // returned value becomes req.auth
  * })
  *
- * const hello = api(
+ * // Classic form
+ * api(
  *   { method: 'GET', path: '/hello/:name', auth: 'required' },
  *   async ({ name, auth }) => ({ message: `Hello ${name}! (${auth.user.id})` }),
  * )
+ *
+ * // Shorthand form — mirrors Hono's app.get()
+ * api.get('/hello/:name', { auth: 'required' }, async ({ name }) => ({ message: `Hello ${name}!` }))
  *
  * docs()
  * ```
@@ -64,11 +75,11 @@ export function createApi(opts = {}) {
         // normalizeMethod helper (same message as OpenAPIHono) for consistency.
         const normalized = normalizeMethod(config.method);
         const method = normalized.toUpperCase();
-        const paramNames = [...config.path.matchAll(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?\??/g)].map((m) => m[1]);
+        const paramTokens = [...config.path.matchAll(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?(\?)?/g)].map((m) => ({ name: m[1], optional: !!m[2] }));
         // Build request schemas
         const request = {};
-        if (paramNames.length > 0) {
-            request.params = type(Object.fromEntries(paramNames.map((n) => [n, "string"])));
+        if (paramTokens.length > 0) {
+            request.params = type(Object.fromEntries(paramTokens.map(({ name, optional }) => [name, optional ? "string?" : "string"])));
         }
         if (config.body)
             request.body = config.body;
@@ -106,9 +117,35 @@ export function createApi(opts = {}) {
             security,
             middleware: mws.length > 0 ? mws : undefined,
             status: config.status,
+            operationId: config.operationId,
+            deprecated: config.deprecated,
         }, (req) => handler(req));
     }
-    function docs(specPath = "/openapi.json", uiPath = "/docs") {
+    // --- Method shorthands: api.get(path, config, handler) etc. ---
+    function makeMethodHelper(method) {
+        function helper(path, config, handler) {
+            api({ ...config, method: method, path }, handler);
+        }
+        return helper;
+    }
+    const apiWithHelpers = api;
+    apiWithHelpers.get = makeMethodHelper("GET");
+    apiWithHelpers.post = makeMethodHelper("POST");
+    apiWithHelpers.put = makeMethodHelper("PUT");
+    apiWithHelpers.patch = makeMethodHelper("PATCH");
+    apiWithHelpers.del = makeMethodHelper("DELETE");
+    apiWithHelpers.delete = apiWithHelpers.del;
+    function docs(specPathOrOpts = "/openapi.json", uiPath = "/docs") {
+        let specPath;
+        let resolvedUiPath;
+        if (typeof specPathOrOpts === "object" && specPathOrOpts !== null) {
+            specPath = specPathOrOpts.specPath ?? "/openapi.json";
+            resolvedUiPath = specPathOrOpts.uiPath ?? "/docs";
+        }
+        else {
+            specPath = specPathOrOpts;
+            resolvedUiPath = uiPath;
+        }
         app.doc(specPath, {
             openapi: "3.0.0",
             info: {
@@ -116,8 +153,8 @@ export function createApi(opts = {}) {
                 version: opts.version ?? "1.0.0",
             },
         });
-        app.get(uiPath, apiReference({ spec: { url: specPath } }));
+        app.get(resolvedUiPath, apiReference({ spec: { url: specPath } }));
     }
-    return { app, api, auth, docs };
+    return { app, api: apiWithHelpers, auth, docs };
 }
 //# sourceMappingURL=api.js.map

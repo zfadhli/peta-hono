@@ -51,12 +51,13 @@ auth('required', async (c) => {
 })
 
 // GET /hello/:name — path params flat at top level, auth context available
-api(
-  { method: 'GET', path: '/hello/:name', auth: 'required' },
+// Shorthand api.get(path, config, handler) mirrors Hono's app.get
+api.get('/hello/:name', { auth: 'required', operationId: 'sayHello' },
   async ({ name, auth }) => ({ message: `Hello ${name}! (${auth.user.id})` }),
 )
 
 // POST /things — body validation via ArkType, typed response
+// Classic form still works — `method` is typed as `Method` (case-insensitive: POST/post/Post)
 api(
   {
     method: 'POST', path: '/things',
@@ -70,10 +71,9 @@ api(
   },
 )
 
-// GET /search — query params
-api(
+// GET /search — query params (also available as api.get)
+api.get('/search',
   {
-    method: 'GET', path: '/search',
     query: type({ q: 'string', limit: '1 <= number.integer <= 100 = 10' }),
     auth: 'required',
   },
@@ -81,7 +81,8 @@ api(
 )
 
 // Mount OpenAPI spec at /openapi.json, docs UI at /docs
-docs()
+// docs() accepts positional args or an options object
+docs({ specPath: '/openapi.json', uiPath: '/docs' })
 export default app
 ```
 
@@ -89,27 +90,33 @@ Run with `nub index.ts` (or `node index.ts` if you've built the lib).
 
 ## How it works
 
-- **`createApi<Auth>(opts)`** — returns `{ api, auth, docs, app }`. The optional `Auth` generic types the auth context object that handlers receive as `req.auth` (omit it for apps with no auth).
-- **`api(config, handler)`** — registers a Hono route with OpenAPI metadata. The handler receives a flat request object with types inferred from the ArkType schemas in `config`. Path params (`:name`) are parsed automatically and appear as top-level keys. When `{ auth: 'name' }` is set, the handler also receives `auth: Auth` (typed via `createApi<Auth>`). Config fields:
+- **`createApi<Auth, Env>(opts)`** — returns `{ api, auth, docs, app }`. The optional `Auth` generic types the auth context (`req.auth`), and `Env` (Hono `Env`) types `req.c` (`c.var`, `c.env`). Omit both for apps with no auth/typed vars.
+- **`api(config, handler)`** / **`api.get(path, config, handler)`** — registers a Hono route with OpenAPI metadata. The handler receives a flat request object with types inferred from the ArkType schemas in `config`. Path params (`:name`, `:id?`, `:id{[0-9]+}`) are parsed automatically and appear as top-level keys (optional params like `:id?` are typed as `string | undefined`). When `{ auth: 'name' }` is set, the handler also receives `auth: Auth`. Shorthands `api.get`, `api.post`, `api.put`, `api.patch`, `api.delete` (alias `api.del`) mirror Hono's `app.get` etc. and infer the path param types from the first arg. Config fields:
+  - `method: Method` — HTTP method, typed with autocomplete (`GET`/`get`/etc, case-insensitive via `normalizeMethod`)
+  - `path: string` — Hono-style path with `:param` tokens
   - `tags?: string[]` — OpenAPI tags for grouping in docs
   - `summary?: string` — operation title in docs
   - `description?: string` — operation description
+  - `operationId?: string` — override auto-generated operationId (useful for SDK generation)
+  - `deprecated?: boolean` — mark operation as deprecated in spec
   - `status?: number` — explicit success status (use 204 for No Content; handler returns `null`)
-- **`auth(name, middleware, scheme?)`** — registers a named auth middleware. **Return-based:** `(c) => Auth` — throw to reject (e.g. `throw fail.unauthorized()`), or return a value that becomes `req.auth` in handlers. Apply via `{ auth: 'name' }` in the api config. Optional `scheme` registers an OpenAPI security scheme (adds lock icon in docs): `{ type: 'http', scheme: 'bearer' }`, `{ type: 'http', scheme: 'basic' }`, or `{ type: 'apiKey', in: 'header', name: 'X-API-Key' }`.
-- **`docs(specPath?, uiPath?)`** — mounts the OpenAPI JSON spec and Scalar docs UI.
-- **`fail`** — throw named HTTP errors: `throw fail.notFound('post not found')`. Helpers for common codes: `fail.badRequest` (400), `fail.unauthorized` (401), `fail.forbidden` (403), `fail.notFound` (404), `fail.conflict` (409), `fail.unprocessableEntity` (422), `fail.tooManyRequests` (429), `fail.internalServerError` (500). Each accepts an optional message (sensible default if omitted). For custom status codes, use `throw new APIError(status, message)` directly.
+- **`auth(name, middleware, scheme?)`** — registers a named auth middleware. **Return-based:** `(c: Context<Env>) => Auth` — throw to reject (e.g. `throw fail.unauthorized()`), or return a value that becomes `req.auth` in handlers. Apply via `{ auth: 'name' }` in the api config. Optional `scheme` registers an OpenAPI security scheme (adds lock icon in docs): `{ type: 'http', scheme: 'bearer' }`, `{ type: 'http', scheme: 'basic' }`, or `{ type: 'apiKey', in: 'header', name: 'X-API-Key' }`.
+- **`docs(specPath?, uiPath?)` / `docs({ specPath?, uiPath? })`** — mounts the OpenAPI JSON spec and Scalar docs UI. Both positional (`docs("/openapi.json", "/docs")`) and options-object (`docs({ specPath, uiPath })`) forms are supported.
+- **`fail` / `errors` / `httpErrors`** — throw named HTTP errors: `throw fail.notFound('post not found')`. Aliases `errors` and `httpErrors` are re-exports of `fail` for callers preferring noun forms. Helpers for common codes: `fail.badRequest` (400), `fail.unauthorized` (401), `fail.forbidden` (403), `fail.notFound` (404), `fail.conflict` (409), `fail.unprocessableEntity` (422), `fail.tooManyRequests` (429), `fail.internalServerError` (500), `fail.badGateway` (502), `fail.serviceUnavailable` (503), `fail.gatewayTimeout` (504). Each accepts an optional message (sensible default if omitted). For custom status codes, use `throw new APIError(status, message)` directly.
 
 Handler returns a plain object (no `c.json()`). The library wraps it in the correct response. Return `null` for 204 No Content.
 
 ## Features
 
-- Path params auto-typed from `:name` syntax — no `c.req.param('name')` digging
+- Path params auto-typed from `:name` syntax — no `c.req.param('name')` digging (including optional `:id?` → `string | undefined`)
 - Body/query/header validation via ArkType — schemas double as OpenAPI input documentation
 - Response schemas feed into OpenAPI output documentation
 - Auth middleware — named, reusable, applied per-endpoint, with OpenAPI security schemes
-- **Typed auth context** — `createApi<Auth>()` + return-based `auth()` middleware propagate the authenticated user to handlers as `req.auth` with full type safety
-- **`fail` error helpers** — `throw fail.notFound('...')` for ergonomic typed HTTP errors (8 named status helpers + `APIError` for custom codes)
-- OpenAPI tags, summary, description for doc grouping
+- **Typed auth context** — `createApi<Auth, Env>()` + return-based `auth()` middleware propagate the authenticated user to handlers as `req.auth` with full type safety; `Env` types `req.c` (`c.var` / `c.env`)
+- **`fail` error helpers** — `throw fail.notFound('...')` for ergonomic typed HTTP errors (11 named status helpers + `APIError` for custom codes; also available as `errors` / `httpErrors`)
+- Method shorthands — `api.get`, `api.post`, `api.put`, `api.patch`, `api.delete`/`api.del` with full type inference, mirroring Hono idioms; `method` typed as `Method` with case-insensitive handling
+- OpenAPI `operationId` / `deprecated` / tags / summary / description for doc grouping and SDK generation
+- `docs()` options-object form — `docs({ specPath, uiPath })` alongside positional args
 - 204 No Content support — handler returns `null`
 - Auto-generated OpenAPI 3.0 spec at `/openapi.json`
 - Scalar API reference UI at `/docs`

@@ -36,13 +36,13 @@ auth(
 
 // --- Register ---
 
-api(
+api.post(
+  "/auth/register",
   {
-    method: "POST",
-    path: "/auth/register",
     body: type({ email: "string", password: "string >= 8" }),
     responses: { 201: type({ id: "string", email: "string" }) },
     summary: "Register a new user",
+    operationId: "register",
     tags: ["Auth"],
   },
   async ({ body, c }) => {
@@ -62,13 +62,13 @@ api(
 
 // --- Login ---
 
-api(
+api.post(
+  "/auth/login",
   {
-    method: "POST",
-    path: "/auth/login",
     body: type({ email: "string", password: "string" }),
     responses: { 200: type({ id: "string", email: "string" }) },
     summary: "Login with email and password",
+    operationId: "login",
     tags: ["Auth"],
   },
   async ({ body, c }) => {
@@ -88,12 +88,12 @@ api(
 
 // --- Profile (protected) ---
 
-api(
+api.get(
+  "/auth/profile",
   {
-    method: "GET",
-    path: "/auth/profile",
     auth: "session",
     summary: "Get profile of currently logged-in user",
+    operationId: "getProfile",
     tags: ["Auth"],
   },
   async ({ auth }) => {
@@ -103,12 +103,12 @@ api(
 
 // --- Logout (protected) ---
 
-api(
+api.post(
+  "/auth/logout",
   {
-    method: "POST",
-    path: "/auth/logout",
     auth: "session",
     summary: "Logout and destroy session",
+    operationId: "logout",
     tags: ["Auth"],
     status: 204,
   },
@@ -121,6 +121,6 @@ api(
 
 // --- Mount OpenAPI docs ---
 
-docs();
+docs({ specPath: "/openapi.json", uiPath: "/docs" });
 
 export default app;

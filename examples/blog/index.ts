@@ -6,8 +6,9 @@ import "./comments.js";
 import { serve } from "@hono/node-server";
 import { app, docs } from "./setup.js";
 
-// Mount docs AFTER all routes are registered
-docs();
+// Mount docs AFTER all routes are registered — options-object form
+// (positional `docs("/openapi.json", "/docs")` still works)
+docs({ specPath: "/openapi.json", uiPath: "/docs" });
 
 serve(app, (info) => {
   console.log(`Blog API → http://localhost:${info.port}`);

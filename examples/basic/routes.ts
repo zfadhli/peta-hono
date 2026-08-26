@@ -21,13 +21,15 @@ auth(
 );
 
 // --- 1. GET /hello/:name — path params (Encore-style) ----------------------
+// Shorthand api.get(path, config, handler) — mirrors Hono's app.get.
+// `operationId` overrides the auto-generated one (useful for SDK gens).
 
-api(
+api.get(
+  "/hello/:name",
   {
-    method: "GET",
-    path: "/hello/:name",
     tags: ["Hello"],
     summary: "Say hello to someone",
+    operationId: "sayHello",
     auth: "required",
   },
   async ({ name }) => ({
@@ -36,10 +38,12 @@ api(
 );
 
 // --- 2. POST /things — body validation + APIError --------------------------
+// `method` is now typed as `Method` with autocomplete; casing is free
+// (`POST` / `post` / `Post` all normalize via `normalizeMethod`).
 
 api(
   {
-    method: "POST",
+    method: "post",
     path: "/things",
     tags: ["Things"],
     summary: "Create a new thing",
@@ -60,10 +64,9 @@ api(
 
 // --- 3. GET /search — query params -----------------------------------------
 
-api(
+api.get(
+  "/search",
   {
-    method: "GET",
-    path: "/search",
     tags: ["Search"],
     summary: "Search for things",
     query: type({
@@ -81,9 +84,22 @@ api(
   },
 );
 
+// --- 4. GET /legacy — deprecated example -----------------------------------
+
+api.get(
+  "/legacy",
+  {
+    tags: ["Hello"],
+    summary: "Deprecated legacy endpoint",
+    deprecated: true,
+  },
+  async () => ({ message: "This endpoint is deprecated" }),
+);
+
 // --- Mount OpenAPI docs ----------------------------------------------------
 
 // ponytail: no auth on docs — protect it in production if needed.
-docs();
+// docs() now accepts either positional args or an options object.
+docs({ specPath: "/openapi.json", uiPath: "/docs" });
 
 export default app;

@@ -13,12 +13,11 @@ const postSchema = type({
   createdAt: "string",
 });
 
-// --- GET /posts — list with pagination ---
+// --- GET /posts — list with pagination (shorthand) ---
 
-api(
+api.get(
+  "/posts",
   {
-    method: "GET",
-    path: "/posts",
     tags: ["Posts"],
     summary: "List all posts",
     query: type({
@@ -31,10 +30,9 @@ api(
 
 // --- GET /posts/:id — get one ---
 
-api(
+api.get(
+  "/posts/:id",
   {
-    method: "GET",
-    path: "/posts/:id",
     tags: ["Posts"],
     summary: "Get a post by ID",
     responses: { 200: postSchema },
@@ -48,10 +46,9 @@ api(
 
 // --- POST /posts — create (auth required) ---
 
-api(
+api.post(
+  "/posts",
   {
-    method: "POST",
-    path: "/posts",
     tags: ["Posts"],
     summary: "Create a new post",
     body: type({
@@ -68,10 +65,9 @@ api(
 
 // --- PUT /posts/:id — update (auth required) ---
 
-api(
+api.put(
+  "/posts/:id",
   {
-    method: "PUT",
-    path: "/posts/:id",
     tags: ["Posts"],
     summary: "Update an existing post",
     body: type({
@@ -92,10 +88,9 @@ api(
 
 // --- DELETE /posts/:id — delete (auth required, returns 204 No Content) ---
 
-api(
+api.delete(
+  "/posts/:id",
   {
-    method: "DELETE",
-    path: "/posts/:id",
     tags: ["Posts"],
     summary: "Delete a post",
     status: 204,

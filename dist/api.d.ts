@@ -1,6 +1,7 @@
 import { type Type } from "arktype";
-import type { Context, MiddlewareHandler } from "hono";
-import { APIError, type AuthScheme, OpenAPIHono } from "./openapi.js";
+import type { Context, Env, MiddlewareHandler } from "hono";
+import { APIError, type AuthScheme, type Method, OpenAPIHono } from "./openapi.js";
+export type { HttpMethod, Method } from "./openapi.js";
 export type { AuthScheme };
 export { APIError };
 export declare const fail: {
@@ -12,33 +13,68 @@ export declare const fail: {
     unprocessableEntity: (msg?: string) => APIError;
     tooManyRequests: (msg?: string) => APIError;
     internalServerError: (msg?: string) => APIError;
+    badGateway: (msg?: string) => APIError;
+    serviceUnavailable: (msg?: string) => APIError;
+    gatewayTimeout: (msg?: string) => APIError;
+};
+/** Alias for `fail` — noun form for callers who prefer `throw errors.notFound()`. */
+export declare const errors: {
+    badRequest: (msg?: string) => APIError;
+    unauthorized: (msg?: string) => APIError;
+    forbidden: (msg?: string) => APIError;
+    notFound: (msg?: string) => APIError;
+    conflict: (msg?: string) => APIError;
+    unprocessableEntity: (msg?: string) => APIError;
+    tooManyRequests: (msg?: string) => APIError;
+    internalServerError: (msg?: string) => APIError;
+    badGateway: (msg?: string) => APIError;
+    serviceUnavailable: (msg?: string) => APIError;
+    gatewayTimeout: (msg?: string) => APIError;
+};
+/** Alias for `fail` — explicit HTTP error helpers. */
+export declare const httpErrors: {
+    badRequest: (msg?: string) => APIError;
+    unauthorized: (msg?: string) => APIError;
+    forbidden: (msg?: string) => APIError;
+    notFound: (msg?: string) => APIError;
+    conflict: (msg?: string) => APIError;
+    unprocessableEntity: (msg?: string) => APIError;
+    tooManyRequests: (msg?: string) => APIError;
+    internalServerError: (msg?: string) => APIError;
+    badGateway: (msg?: string) => APIError;
+    serviceUnavailable: (msg?: string) => APIError;
+    gatewayTimeout: (msg?: string) => APIError;
 };
 type AnyArkType = Type<any, any>;
 /** Extract the inferred output type from an ArkType instance. */
 type ArkInfer<T> = T extends {
     infer: infer I;
 } ? I : never;
-/** Strip regex `{...}` and optional `?` suffix from a param token. */
-type StripParam<S extends string> = S extends `${infer Name}{${string}}` ? StripParam<Name> : S extends `${infer Name}?` ? Name : S;
-/** Extract `:name` tokens from a Hono-style path (handles :name, :name{regex}, :name?, etc.). */
-type PathParam<P extends string> = P extends `${string}:${infer Param}/${infer Rest}` ? StripParam<Param> | PathParam<`/${Rest}`> : P extends `${string}:${infer Param}` ? StripParam<Param> : never;
-/** Build `{ name: string }` from a path like `/hello/:name`. */
-type ParamsFromPath<P extends string> = {
-    [K in PathParam<P> & string]: string;
+/** Single param token → record, handling optional `?` and regex `{...}`. */
+type ParamRecord<S extends string> = S extends `${infer N}{${string}}?` ? {
+    [K in N]?: string;
+} : S extends `${infer N}?` ? {
+    [K in N]?: string;
+} : S extends `${infer N}{${string}}` ? {
+    [K in N]: string;
+} : {
+    [K in S]: string;
 };
+/** Build `{ name: string }` / `{ name?: string }` from a path like `/hello/:name` or `/posts/:id?`. */
+type ParamsFromPath<P extends string> = P extends `${string}:${infer Param}/${infer Rest}` ? ParamRecord<Param> & ParamsFromPath<`/${Rest}`> : P extends `${string}:${infer Param}` ? ParamRecord<Param> : {};
 /**
  * The request object the handler receives — inferred from the config generics.
  * Path params are flat top-level keys (Encore-style).
  * Body / query / headers are nested under their own keys.
  */
-type ReqFor<P extends string, B, Q, H> = ParamsFromPath<P> & (B extends AnyArkType ? {
+type ReqFor<P extends string, B, Q, H, E extends Env = Env> = ParamsFromPath<P> & (B extends AnyArkType ? {
     body: ArkInfer<B>;
 } : {}) & (Q extends AnyArkType ? {
     query: ArkInfer<Q>;
 } : {}) & (H extends AnyArkType ? {
     headers: ArkInfer<H>;
 } : {}) & {
-    c: Context;
+    c: Context<E>;
 };
 /** Add `auth: Auth` to req only when Auth is not undefined (no-auth app). */
 type AuthField<Auth> = [Auth] extends [undefined] ? {} : {
@@ -46,7 +82,7 @@ type AuthField<Auth> = [Auth] extends [undefined] ? {} : {
 };
 /** Shared config fields for api() overloads — minus the `auth` key. */
 type RouteFields<P extends string, B, Q, H> = {
-    method: string;
+    method: Method;
     path: P;
     body?: B;
     query?: Q;
@@ -57,7 +93,11 @@ type RouteFields<P extends string, B, Q, H> = {
     summary?: string;
     description?: string;
     status?: number;
+    operationId?: string;
+    deprecated?: boolean;
 };
+/** RouteFields without method/path — used for method shorthands like api.get(path, config, handler) */
+type RouteFieldsWithoutMethodPath<P extends string, B, Q, H> = Omit<RouteFields<P, B, Q, H>, "method" | "path">;
 /**
  * Create an Encore-style API builder on top of Hono + OpenAPI.
  *
@@ -70,29 +110,88 @@ type RouteFields<P extends string, B, Q, H> = {
  *   return { user: { id: 'alice' } }   // returned value becomes req.auth
  * })
  *
- * const hello = api(
+ * // Classic form
+ * api(
  *   { method: 'GET', path: '/hello/:name', auth: 'required' },
  *   async ({ name, auth }) => ({ message: `Hello ${name}! (${auth.user.id})` }),
  * )
  *
+ * // Shorthand form — mirrors Hono's app.get()
+ * api.get('/hello/:name', { auth: 'required' }, async ({ name }) => ({ message: `Hello ${name}!` }))
+ *
  * docs()
  * ```
  */
-export declare function createApi<Auth = undefined>(opts?: {
+export declare function createApi<Auth = undefined, E extends Env = Env>(opts?: {
     title?: string;
     version?: string;
     debug?: boolean;
 }): {
-    app: OpenAPIHono<import("hono").Env, import("hono").Schema, "/">;
+    app: OpenAPIHono<E, import("hono").Schema, "/">;
     api: {
         <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(config: RouteFields<P, B, Q, H> & {
             auth?: undefined;
-        }, handler: (req: ReqFor<P, B, Q, H>) => Promise<any> | any): void;
+        }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
         <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(config: RouteFields<P, B, Q, H> & {
             auth: string;
-        }, handler: (req: ReqFor<P, B, Q, H> & AuthField<Auth>) => Promise<any> | any): void;
+        }, handler: (req: ReqFor<P, B, Q, H, E> & AuthField<Auth>) => Promise<any> | any): void;
+    } & {
+        get: ReturnType<(<M extends Method>(method: M) => {
+            <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
+                auth?: undefined;
+            }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
+            <P extends string, B_1 extends AnyArkType | undefined, Q_1 extends AnyArkType | undefined, H_1 extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B_1, Q_1, H_1> & {
+                auth: string;
+            }, handler: (req: ReqFor<P, B_1, Q_1, H_1, E> & AuthField<Auth>) => Promise<any> | any): void;
+        })>;
+        post: ReturnType<(<M extends Method>(method: M) => {
+            <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
+                auth?: undefined;
+            }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
+            <P extends string, B_1 extends AnyArkType | undefined, Q_1 extends AnyArkType | undefined, H_1 extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B_1, Q_1, H_1> & {
+                auth: string;
+            }, handler: (req: ReqFor<P, B_1, Q_1, H_1, E> & AuthField<Auth>) => Promise<any> | any): void;
+        })>;
+        put: ReturnType<(<M extends Method>(method: M) => {
+            <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
+                auth?: undefined;
+            }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
+            <P extends string, B_1 extends AnyArkType | undefined, Q_1 extends AnyArkType | undefined, H_1 extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B_1, Q_1, H_1> & {
+                auth: string;
+            }, handler: (req: ReqFor<P, B_1, Q_1, H_1, E> & AuthField<Auth>) => Promise<any> | any): void;
+        })>;
+        patch: ReturnType<(<M extends Method>(method: M) => {
+            <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
+                auth?: undefined;
+            }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
+            <P extends string, B_1 extends AnyArkType | undefined, Q_1 extends AnyArkType | undefined, H_1 extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B_1, Q_1, H_1> & {
+                auth: string;
+            }, handler: (req: ReqFor<P, B_1, Q_1, H_1, E> & AuthField<Auth>) => Promise<any> | any): void;
+        })>;
+        del: ReturnType<(<M extends Method>(method: M) => {
+            <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
+                auth?: undefined;
+            }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
+            <P extends string, B_1 extends AnyArkType | undefined, Q_1 extends AnyArkType | undefined, H_1 extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B_1, Q_1, H_1> & {
+                auth: string;
+            }, handler: (req: ReqFor<P, B_1, Q_1, H_1, E> & AuthField<Auth>) => Promise<any> | any): void;
+        })>;
+        delete: ReturnType<(<M extends Method>(method: M) => {
+            <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
+                auth?: undefined;
+            }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
+            <P extends string, B_1 extends AnyArkType | undefined, Q_1 extends AnyArkType | undefined, H_1 extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B_1, Q_1, H_1> & {
+                auth: string;
+            }, handler: (req: ReqFor<P, B_1, Q_1, H_1, E> & AuthField<Auth>) => Promise<any> | any): void;
+        })>;
     };
-    auth: (name: string, mw: (c: Context) => Promise<Auth> | Auth, scheme?: AuthScheme) => void;
-    docs: (specPath?: string, uiPath?: string) => void;
+    auth: (name: string, mw: (c: Context<E>) => Promise<Auth> | Auth, scheme?: AuthScheme) => void;
+    docs: {
+        (specPath?: string, uiPath?: string): void;
+        (options: {
+            specPath?: string;
+            uiPath?: string;
+        }): void;
+    };
 };
 //# sourceMappingURL=api.d.ts.map

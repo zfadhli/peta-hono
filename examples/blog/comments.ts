@@ -13,10 +13,9 @@ const commentSchema = type({
 
 // --- GET /posts/:postId/comments — list comments for a post ---
 
-api(
+api.get(
+  "/posts/:postId/comments",
   {
-    method: "GET",
-    path: "/posts/:postId/comments",
     tags: ["Comments"],
     summary: "List comments on a post",
     responses: { 200: type({ comments: commentSchema.array() }) },
@@ -29,10 +28,9 @@ api(
 
 // --- POST /posts/:postId/comments — create comment (auth required) ---
 
-api(
+api.post(
+  "/posts/:postId/comments",
   {
-    method: "POST",
-    path: "/posts/:postId/comments",
     tags: ["Comments"],
     summary: "Add a comment to a post",
     body: type({ content: "string >= 1" }),
@@ -48,10 +46,9 @@ api(
 
 // --- DELETE /posts/:postId/comments/:commentId — delete comment (auth required) ---
 
-api(
+api.delete(
+  "/posts/:postId/comments/:commentId",
   {
-    method: "DELETE",
-    path: "/posts/:postId/comments/:commentId",
     tags: ["Comments"],
     summary: "Delete a comment",
     status: 204,

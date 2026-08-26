@@ -280,17 +280,17 @@ export class OpenAPIHono extends Hono {
             throw new Error(`Path must start with "/": ${config.path}`);
         }
         const oapiPath = toOapiPath(config.path);
-        const paramNames = [...config.path.matchAll(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?\??/g)].map((m) => m[1]);
+        const paramTokens = [...config.path.matchAll(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?(\?)?/g)].map((m) => ({ name: m[1], optional: !!m[2] }));
         // Build middlewares from request schemas
         const mws = [];
         if (config.request?.params) {
             mws.push(arktypeValidator("param", config.request.params));
         }
-        else if (paramNames.length > 0) {
-            // Auto-generate params schema from path tokens
+        else if (paramTokens.length > 0) {
+            // Auto-generate params schema from path tokens — optional `:id?` becomes "string?"
             const paramsDef = {};
-            for (const name of paramNames)
-                paramsDef[name] = "string";
+            for (const { name, optional } of paramTokens)
+                paramsDef[name] = optional ? "string?" : "string";
             mws.push(arktypeValidator("param", type(paramsDef)));
         }
         if (config.request?.query)
@@ -314,7 +314,7 @@ export class OpenAPIHono extends Hono {
             const creq = c.req;
             const req = {};
             // Flatten path params to top level (Encore-style: handler({ name }) not handler({ params: { name } }))
-            if (paramNames.length > 0) {
+            if (paramTokens.length > 0) {
                 Object.assign(req, creq.valid("param"));
             }
             if (config.request?.body)
@@ -360,7 +360,8 @@ export class OpenAPIHono extends Hono {
         const baseCounts = new Map();
         for (const route of this._routes) {
             const pathItem = paths[route.oapiPath] ?? {};
-            const baseId = `${route.method}_${route.oapiPath.replace(/[{}]/g, "").replace(/\//g, "_")}`;
+            const baseId = route.config.operationId ??
+                `${route.method}_${route.oapiPath.replace(/[{}]/g, "").replace(/\//g, "_")}`;
             let operationId = baseId;
             if (seenOperationIds.has(operationId)) {
                 let n = (baseCounts.get(baseId) ?? 1) + 1;
@@ -385,6 +386,8 @@ export class OpenAPIHono extends Hono {
                 op.description = route.config.description;
             if (route.config.security)
                 op.security = route.config.security;
+            if (route.config.deprecated)
+                op.deprecated = true;
             // Parameters (path + query + header)
             const params = [];
             if (route.config.request?.params) {

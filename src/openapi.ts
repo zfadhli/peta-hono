@@ -56,6 +56,7 @@ interface OpenAPIOperation {
   security?: Record<string, string[]>[];
   parameters?: OpenAPIParameter[];
   requestBody?: OpenAPIRequestBody;
+  deprecated?: boolean;
 }
 
 interface OpenAPIComponents {
@@ -73,7 +74,7 @@ interface OpenAPISpec {
 // --- Route config ---
 
 export interface RouteConfig {
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  method: Method;
   path: string; // Hono-style /:param
   request?: {
     body?: ArkType;
@@ -88,6 +89,10 @@ export interface RouteConfig {
   security?: Record<string, string[]>[];
   middleware?: MiddlewareHandler[];
   status?: number;
+  /** Override auto-generated operationId (useful for SDK generation). */
+  operationId?: string;
+  /** Mark operation as deprecated in OpenAPI docs. */
+  deprecated?: boolean;
 }
 
 /** Single error policy — shared by OpenAPIHono and createApi (via createErrorHandler). */
@@ -155,6 +160,10 @@ interface ComponentRegistry {
 // --- Helpers ---
 
 const SUPPORTED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+
+export type HttpMethod = (typeof SUPPORTED_METHODS)[number];
+/** Method string accepted by api() — supports any casing, autocomplete for known methods. */
+export type Method = HttpMethod | Lowercase<HttpMethod> | (string & {});
 
 export function normalizeMethod(m: string): string {
   const lower = m.toLowerCase();
@@ -397,8 +406,8 @@ export class OpenAPIHono<
       throw new Error(`Path must start with "/": ${config.path}`);
     }
     const oapiPath = toOapiPath(config.path);
-    const paramNames = [...config.path.matchAll(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?\??/g)].map(
-      (m) => m[1]!,
+    const paramTokens = [...config.path.matchAll(/:([a-zA-Z0-9_]+)(?:\{[^}]+\})?(\?)?/g)].map(
+      (m) => ({ name: m[1]!, optional: !!m[2] }),
     );
 
     // Build middlewares from request schemas
@@ -406,10 +415,11 @@ export class OpenAPIHono<
 
     if (config.request?.params) {
       mws.push(arktypeValidator("param", config.request.params));
-    } else if (paramNames.length > 0) {
-      // Auto-generate params schema from path tokens
+    } else if (paramTokens.length > 0) {
+      // Auto-generate params schema from path tokens — optional `:id?` becomes "string?"
       const paramsDef: Record<string, string> = {};
-      for (const name of paramNames) paramsDef[name] = "string";
+      for (const { name, optional } of paramTokens)
+        paramsDef[name] = optional ? "string?" : "string";
       mws.push(arktypeValidator("param", type(paramsDef)));
     }
 
@@ -440,7 +450,7 @@ export class OpenAPIHono<
       const req: Record<string, unknown> = {};
 
       // Flatten path params to top level (Encore-style: handler({ name }) not handler({ params: { name } }))
-      if (paramNames.length > 0) {
+      if (paramTokens.length > 0) {
         Object.assign(req, creq.valid("param"));
       }
       if (config.request?.body) req.body = creq.valid("json");
@@ -496,7 +506,9 @@ export class OpenAPIHono<
 
     for (const route of this._routes) {
       const pathItem = paths[route.oapiPath] ?? {};
-      const baseId = `${route.method}_${route.oapiPath.replace(/[{}]/g, "").replace(/\//g, "_")}`;
+      const baseId =
+        route.config.operationId ??
+        `${route.method}_${route.oapiPath.replace(/[{}]/g, "").replace(/\//g, "_")}`;
       let operationId = baseId;
       if (seenOperationIds.has(operationId)) {
         let n = (baseCounts.get(baseId) ?? 1) + 1;
@@ -516,6 +528,7 @@ export class OpenAPIHono<
       if (route.config.summary) op.summary = route.config.summary;
       if (route.config.description) op.description = route.config.description;
       if (route.config.security) op.security = route.config.security;
+      if (route.config.deprecated) op.deprecated = true;
 
       // Parameters (path + query + header)
       const params: OpenAPIParameter[] = [];

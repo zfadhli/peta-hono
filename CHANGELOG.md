@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-26
+
+### Added
+
+- Method shorthands `api.get`, `api.post`, `api.put`, `api.patch`, `api.delete`/`api.del` with full path-param and ArkType inference — mirrors Hono `app.get` ergonomics. Classic `api({ method, path })` form unchanged.
+- Typed `Method` / `HttpMethod` exports — `method` field now autocompletes known verbs and `normalizeMethod` handles any casing (`GET`/`get`/`Get`).
+- `operationId` and `deprecated` route config fields — custom operationIds for SDK generation and deprecated marking in OpenAPI spec.
+- `docs()` options-object overload — `docs({ specPath, uiPath })` alongside existing positional `docs(specPath, uiPath)`.
+- `createApi<Auth, Env>` second generic — types `req.c` (`Context<Env>`) for `c.var` / `c.env` access; `auth()` middleware now typed as `(c: Context<Env>) => Auth`.
+- `Env`-aware `ReqFor` — path, body, query, headers plus `c: Context<Env>`.
+- `fail` aliases `errors` / `httpErrors` and new helpers `fail.badGateway` (502), `fail.serviceUnavailable` (503), `fail.gatewayTimeout` (504) — 11 helpers total.
+- Optional path-param typing — `:id?` and `:id{regex}?` correctly infer as `string | undefined`; runtime schema now emits `string?` for optional params.
+- Examples updated to shorthands, `operationId`/`deprecated` usage, and `docs({ specPath, uiPath })` form.
+
+### Changed
+
+- `docs()` signature extended (non-breaking) to support options object while keeping positional args.
+- Deterministic spec emission intact — `toOapiPath`, `normalizeMethod`, stable `schema_<12hex>` hoisting unchanged; `operationId` custom values deduplicate with `_2` suffix on collision, `deprecated` emits verbatim.
+
 ## [0.4.0] - 2026-07-04
 
 ### Added
