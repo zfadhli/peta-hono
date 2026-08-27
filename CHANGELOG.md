@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-08-27
+
+### Fixed
+
+- **Auth-doc contract (#03)** — a route with `{ auth }` is always documented as protected: it emits a `401 Unauthorized` response, a `security` requirement, and the matching `components.securitySchemes` entry — even when `auth()` is registered *without* a `scheme` argument. When the `scheme` arg is omitted, a default `{ type: "http", scheme: "bearer" }` scheme is published (the `scheme` arg only controls the lock-icon kind).
+- **Unified 404 (#04)** — unmatched routes now return `application/json {error}` through the single `createErrorHandler` policy instead of Hono's `text/plain "404 Not Found"`, so a `fail.notFound()` and an unmatched route share one shape (and one chokepoint).
+- **Dev-only `debug` (#06)** — `debug: true` reveals `{ error, stack }` only when `NODE_ENV=development` (or `test`). In a production deploy where `NODE_ENV` is absent (or a Bun/Deno/edge runtime without `process`), details are withheld rather than leaked — the old gate leaked because `isProd = NODE_ENV === "production"` defaulted to false when unset.
+- **Success-code selection (#08)** — the default success status is the **lowest** declared 2xx/3xx (JS enumerates integer-like response keys in ascending order), not "first". Docs corrected; set `status` explicitly when declaring multiple 2xx/3xx.
+- **Default `info.version` (#12)** — an omitted `version` now defaults to `"0.0.0"` instead of a misleading `"1.0.0"` for a pre-1.0 library.
+
+### Added
+
+- **`hide400` opt-out (#05)** — suppress the auto-documented `400` on a pure `:param` route via `hide400: true` (surfaced through `api()`, the `api.get()` shorthands, and `OpenAPIHono.openapi()`); a user-declared `responses: {400}` and the always-on `500` are preserved.
+
+### Changed
+
+- **`fail` is the canonical error helper (#09)** — `errors` and `httpErrors` are deprecated pure synonyms (still exported); README/glossary/ADR now use one consistent name.
+- **Negative auth type diagnostic (#11)** — `ReqFor` documents that `Property 'auth' does not exist on type 'ReqFor<...>'` means the route is missing `auth: "required"`; README shows the negative case.
+- **Docs accuracy (#07, #10)** — README structure tree reflects the real tree (`basic/`, `db.ts`+`schema.ts`, `auth/`, `src/paths.ts`, `spec.snapshot.json`); standard `npm install peta-hono hono arktype` (and pnpm/bun) install path; Nub noted as only needed for repo examples; Multi-file section warns that `import "./posts.js"` is a required side-effect import that `"sideEffects": false` can drop, and softens the `docs()` ordering (the spec builds lazily; route registration order is what matters). ADR-010 status corrected to Accepted-implemented; the `errors`/`validation`/`registry` sketch is marked proposed.
+- **`:param{regex}` and `method` typos documented (#12)** — `{regex}` is enforced by Hono's router (a mismatch → 404), not the ArkType param validator (which types/validates the segment as `string`); `method`'s `(string & {})` escape hatch means a typo passes typecheck and throws at runtime via `normalizeMethod`.
+
 ## [0.5.2] - 2026-08-27
 
 ### Fixed
