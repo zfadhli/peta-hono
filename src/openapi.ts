@@ -604,6 +604,14 @@ export class OpenAPIHono<
 
     // Framework-guaranteed error responses (zero-config, share one schema component)
     // 400 Bad Request — any endpoint with validated body/query/headers/params
+    //                 OR path has `:param` (auto-generated params schema via hasParamTokens).
+    //                 ponytail: auto-generated params means `GET /:id` documents 400 even
+    //                 without explicit body/query validation. The params are validated via
+    //                 arktypeValidator("param") (b6354f3), so it's intentional; benign
+    //                 false-positive if the param string never actually 400s. Guard
+    //                 `if (!responses["400"])` respects explicit `responses:{400: schema}`,
+    //                 which REPLACES the auto doc rather than suppressing it. Ceiling:
+    //                 explicit `hide400` opt-out if the noise matters.
     // 401 Unauthorized — any endpoint behind a registered auth scheme
     const errorRef = await this._getErrorSchemaRef();
     const addFrameworkError = async (code: number, description: string) => {

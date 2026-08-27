@@ -100,6 +100,27 @@ type RouteFields<P extends string, B, Q, H> = {
 /** RouteFields without method/path — used for method shorthands like api.get(path, config, handler) */
 type RouteFieldsWithoutMethodPath<P extends string, B, Q, H> = Omit<RouteFields<P, B, Q, H>, "method" | "path">;
 /**
+ * Explicit shorthand helper type — preserves both overloads.
+ * Do NOT use `ReturnType<typeof makeMethodHelper>` here: `ReturnType` on an
+ * overloaded function collapses to the last (implementation) signature
+ * `auth?: string` → `req & { auth: Auth }`, losing the `auth:"required"`
+ * → `AuthField<Auth>` distinction. With `Auth=undefined` the collapsed
+ * signature incorrectly allows `api.get("/x", {auth:"required"}, ({auth})=>...)`
+ * because `auth: Auth` becomes `auth: undefined` (present), while the
+ * two-overload form correctly requires `AuthField<undefined>={}` (absent) and
+ * errors on the negative case. Classic `api({method,path,auth})` kept the
+ * two overloads directly, so it still errored; shorthands did not.
+ * Explicit interface keeps the negative case a type error.
+ */
+type ApiMethodHelper<Auth, E extends Env> = {
+    <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
+        auth?: undefined;
+    }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
+    <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
+        auth: string;
+    }, handler: (req: ReqFor<P, B, Q, H, E> & AuthField<Auth>) => Promise<any> | any): void;
+};
+/**
  * Create an Encore-style API builder on top of Hono + OpenAPI.
  *
  * ```ts
@@ -137,54 +158,12 @@ export declare function createApi<Auth = undefined, E extends Env = Env>(opts?: 
             auth: string;
         }, handler: (req: ReqFor<P, B, Q, H, E> & AuthField<Auth>) => Promise<any> | any): void;
     } & {
-        get: ReturnType<(<M extends Method>(method: M) => {
-            <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
-                auth?: undefined;
-            }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
-            <P extends string, B_1 extends AnyArkType | undefined, Q_1 extends AnyArkType | undefined, H_1 extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B_1, Q_1, H_1> & {
-                auth: string;
-            }, handler: (req: ReqFor<P, B_1, Q_1, H_1, E> & AuthField<Auth>) => Promise<any> | any): void;
-        })>;
-        post: ReturnType<(<M extends Method>(method: M) => {
-            <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
-                auth?: undefined;
-            }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
-            <P extends string, B_1 extends AnyArkType | undefined, Q_1 extends AnyArkType | undefined, H_1 extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B_1, Q_1, H_1> & {
-                auth: string;
-            }, handler: (req: ReqFor<P, B_1, Q_1, H_1, E> & AuthField<Auth>) => Promise<any> | any): void;
-        })>;
-        put: ReturnType<(<M extends Method>(method: M) => {
-            <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
-                auth?: undefined;
-            }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
-            <P extends string, B_1 extends AnyArkType | undefined, Q_1 extends AnyArkType | undefined, H_1 extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B_1, Q_1, H_1> & {
-                auth: string;
-            }, handler: (req: ReqFor<P, B_1, Q_1, H_1, E> & AuthField<Auth>) => Promise<any> | any): void;
-        })>;
-        patch: ReturnType<(<M extends Method>(method: M) => {
-            <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
-                auth?: undefined;
-            }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
-            <P extends string, B_1 extends AnyArkType | undefined, Q_1 extends AnyArkType | undefined, H_1 extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B_1, Q_1, H_1> & {
-                auth: string;
-            }, handler: (req: ReqFor<P, B_1, Q_1, H_1, E> & AuthField<Auth>) => Promise<any> | any): void;
-        })>;
-        del: ReturnType<(<M extends Method>(method: M) => {
-            <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
-                auth?: undefined;
-            }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
-            <P extends string, B_1 extends AnyArkType | undefined, Q_1 extends AnyArkType | undefined, H_1 extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B_1, Q_1, H_1> & {
-                auth: string;
-            }, handler: (req: ReqFor<P, B_1, Q_1, H_1, E> & AuthField<Auth>) => Promise<any> | any): void;
-        })>;
-        delete: ReturnType<(<M extends Method>(method: M) => {
-            <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
-                auth?: undefined;
-            }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
-            <P extends string, B_1 extends AnyArkType | undefined, Q_1 extends AnyArkType | undefined, H_1 extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B_1, Q_1, H_1> & {
-                auth: string;
-            }, handler: (req: ReqFor<P, B_1, Q_1, H_1, E> & AuthField<Auth>) => Promise<any> | any): void;
-        })>;
+        get: ApiMethodHelper<Auth, E>;
+        post: ApiMethodHelper<Auth, E>;
+        put: ApiMethodHelper<Auth, E>;
+        patch: ApiMethodHelper<Auth, E>;
+        del: ApiMethodHelper<Auth, E>;
+        delete: ApiMethodHelper<Auth, E>;
     };
     auth: (name: string, mw: (c: Context<E>) => Promise<Auth> | Auth, scheme?: AuthScheme) => void;
     docs: {

@@ -16,7 +16,7 @@
 | **Registry & Hoisting** — `ComponentRegistry`, `sha1Hex`, `rewriteRefs`, `_schemaToOA`, `_getErrorSchemaRef` | `openapi.ts` private | Spec + hash + crypto mixed into routing class | `src/registry.ts` | Pure functions `(schema, registry) => JsonSchema`; async hash isolated. |
 | **Error Kernel** — `APIError`, `ErrorHandler`, `createErrorHandler`, `fail` | `APIError`+`createErrorHandler` in `openapi.ts`, `fail` in `api.ts` | Cycle risk (`validator → APIError`) | `src/errors.ts` | Kernel, no deps on Hono/ArkType. Both `validation` and `openapi` import. Solves circular `api ↔ openapi`. |
 | **OpenAPI Emission** — `OpenAPIHono`, `_routes`, `_buildSpec`, `_buildResponses`, `_addObjectParams`, `doc()` | `openapi.ts` class | God class (routing + spec + registry + errors) | `src/openapi.ts` (orchestrator, <300 LOC after extraction) | Injects `paths`, `validation`, `registry`, `errors`. Owns only Hono dispatch + `StoredRoute[]`. |
-| **DSL Facade** — `createApi`, `api()` overloads, `api.get()` shorthands, `auth()` wrap, `docs()`, `ReqFor`, `ParamsFromPath`, `RouteFields` | `src/api.ts` | Leaks low-level `request.params` building if regex diverges | `src/api.ts` (facade) | Depends on `paths` + `openapi` + `errors` + `validation` types only. No `coerce*` or `sha1Hex`. |
+| **DSL Facade** — `createApi`, `api()` overloads, `api.get()` shorthands (`ApiMethodHelper`), `auth()` wrap, `docs()`, `ReqFor`, `ParamsFromPath`, `RouteFields` | `src/api.ts` | Leaked `ReturnType` shorthand collapsed overloads (grilling 02) | `src/api.ts` (facade) — **fixed 2026-08-26: `ApiMethodHelper<Auth,E>` explicit two-overload interface** | Depends on `paths` + `openapi` + `errors` + `validation` types only. No `coerce*` or `sha1Hex`. |
 
 ### Bounded contexts (DDD)
 
@@ -35,6 +35,8 @@
 
 - [x] Extract `src/paths.ts` first (ADR-010) — 1 constant + 2 functions, zero risk. **Done 2026-08-26** — `src/paths.ts` canonical, `src/index.ts` barrel now re-exports `normalizeMethod` (patch 0.5.1). `toOapiPath` header ponytail moved to `_addObjectParams`.
 - [x] Header lowercasing user-facing doc — README `How it works` + `Features` + AGENTS `Key patterns` now state lowercase keys; glossary `Coercion`/`Ponytail` amended (see 2026-08-26 patch).
+- [x] Fix shorthand overload collapse — `ApiMethodHelper<Auth,E>` replaces `ReturnType<typeof makeMethodHelper>` (ADR-009, grilling 02) — negative `api.get` with `auth` on `createApi<undefined>` now errors, matching classic `api()`.
+- [x] Clarify 400 auto-doc on param routes — `_buildResponses` `hasParamTokens` intentionally documents `400` for `GET /:id` (b6354f3); `src/openapi.ts` comment + ADR-007 now state `OR path has :param` and `Guard if(!responses["400"])` suppresses only via explicit `responses:{400}` ponytail (grilling 06).
 - [ ] Extract `src/errors.ts` — move `APIError`+`createErrorHandler`+`fail` there; re-export from `openapi.ts`/`api.ts` for barrel stability.
 - [ ] Extract `src/validation.ts` — after `errors.ts` exists (breaks cycle).
 - [ ] Defer `src/registry.ts` split until `openapi.ts` >800 LOC or second divergent change (ADR-011 — Proposed, not now).
@@ -153,7 +155,12 @@ export type ParamRecord<S extends string> = ...; // :id? → {id?:string}
 export type ParamsFromPath<P extends string> = ...; // recursive ParamRecord & ...
 export type ReqFor<P,B,Q,H,E extends Env> = ParamsFromPath<P> & {body?:ArkInfer<B>} & {query?:ArkInfer<Q>} & {headers?:ArkInfer<H>} & {c:Context<E>} & AuthField<Auth>;
 export type RouteFields<P,B,Q,H> = { method:Method; path:P; body?:B; query?:Q; headers?:H; responses?; middleware?; tags?; summary?; description?; status?; operationId?; deprecated?; auth?:string };
-export function createApi<Auth=undefined,E extends Env>(opts?:{title?,version?,debug?}): { app:OpenAPIHono<E>; api: ApiWithHelpers; auth:(name:string,mw:(c:Context<E>)=>Auth,scheme?:AuthScheme)=>void; docs:(...args)=>void };
+export type ApiMethodHelper<Auth,E extends Env> = {
+  <P extends string,B,Q,H>(path:P, config:RouteFieldsWithoutMethodPath<P,B,Q,H> & {auth?:undefined}, handler:(req:ReqFor<P,B,Q,H,E>)=>any): void;
+  <P extends string,B,Q,H>(path:P, config:RouteFieldsWithoutMethodPath<P,B,Q,H> & {auth:string}, handler:(req:ReqFor<P,B,Q,H,E> & AuthField<Auth>)=>any): void;
+}; // explicit, not ReturnType — fixes grilling 02 collapse
+// makeMethodHelper<M>(method:M): ApiMethodHelper<Auth,E> delegates to api({method,path,...})
+export function createApi<Auth=undefined,E extends Env>(opts?:{title?,version?,debug?}): { app:OpenAPIHono<E>; api: ApiWithHelpers; auth:(name:string,mw:(c:Context<E>)=>Auth,scheme?:AuthScheme)=>void; docs:(...args)=>void }; // ApiWithHelpers: api & {get:ApiMethodHelper, post:ApiMethodHelper, ...}
 ```
 
 ### Transformations & invariants (checklist)
@@ -167,7 +174,7 @@ export function createApi<Auth=undefined,E extends Env>(opts?:{title?,version?,d
 | `RouteConfig → StoredRoute` | `paramTokens` | `parseParamTokens(config.path)` — used for validator + `req` flattening | Re-derived per `openapi()`, not stored |
 | `StoredRoute → Operation` | `operationId` | `config.operationId ?? "${method}_${oapiPath.replace(/[{}]/g,"").replace(/\//g,"_")}"` + dedup `Set`+`Map` → `_2` | Unique across spec |
 | `StoredRoute → Operation` | `parameters[]` | `_addObjectParams` via `schemaToOA` then `json.properties` + `required` set; header names lowercased (`paramName = name.toLowerCase()` when `in==="header"`) | Uses `schemaToOA` (hoisted), not raw `toJsonSchema`. **Invariant:** header schemas MUST use lowercase keys; `coerceDeep` does NOT auto-lowercase (strict 400). |
-| `StoredRoute → Operation` | `responses` | `_buildResponses`: user `responses` + framework `400/401/404/500` with `if(!responses[key])` guard + single `getErrorSchemaRef()` | Explicit `responses:{404}` suppresses heuristic |
+| `StoredRoute → Operation` | `responses` | `_buildResponses`: user `responses` + framework `400/401/404/500` with `if(!responses[key])` guard + single `getErrorSchemaRef()`; `400` triggers on `request.body/query/headers/params` **or** `hasParamTokens(path)` (auto-generated params) | Explicit `responses:{400}` replaces auto; explicit `responses:{404}` suppresses heuristic (ponytail grilling 06) |
 | `StoredRoute → Hono` | dispatch | `this.on(method, path, ...mws, handlerWrapper)` via `dispatch` cast | `handlerWrapper` flattens `valid("param")` → `req`, injects `auth`/`c`, maps `null→204`, `Response→passthrough`, else `c.json` |
 
 ### Handler runtime shape

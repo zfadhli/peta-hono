@@ -94,6 +94,42 @@ type RouteFieldsWithoutMethodPath<P extends string, B, Q, H> = Omit<
   "method" | "path"
 >;
 
+/**
+ * Explicit shorthand helper type — preserves both overloads.
+ * Do NOT use `ReturnType<typeof makeMethodHelper>` here: `ReturnType` on an
+ * overloaded function collapses to the last (implementation) signature
+ * `auth?: string` → `req & { auth: Auth }`, losing the `auth:"required"`
+ * → `AuthField<Auth>` distinction. With `Auth=undefined` the collapsed
+ * signature incorrectly allows `api.get("/x", {auth:"required"}, ({auth})=>...)`
+ * because `auth: Auth` becomes `auth: undefined` (present), while the
+ * two-overload form correctly requires `AuthField<undefined>={}` (absent) and
+ * errors on the negative case. Classic `api({method,path,auth})` kept the
+ * two overloads directly, so it still errored; shorthands did not.
+ * Explicit interface keeps the negative case a type error.
+ */
+type ApiMethodHelper<Auth, E extends Env> = {
+  <
+    P extends string,
+    B extends AnyArkType | undefined,
+    Q extends AnyArkType | undefined,
+    H extends AnyArkType | undefined,
+  >(
+    path: P,
+    config: RouteFieldsWithoutMethodPath<P, B, Q, H> & { auth?: undefined },
+    handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any,
+  ): void;
+  <
+    P extends string,
+    B extends AnyArkType | undefined,
+    Q extends AnyArkType | undefined,
+    H extends AnyArkType | undefined,
+  >(
+    path: P,
+    config: RouteFieldsWithoutMethodPath<P, B, Q, H> & { auth: string },
+    handler: (req: ReqFor<P, B, Q, H, E> & AuthField<Auth>) => Promise<any> | any,
+  ): void;
+};
+
 // --- Create the API builder ---
 
 /**
@@ -250,7 +286,7 @@ export function createApi<Auth = undefined, E extends Env = Env>(
 
   // --- Method shorthands: api.get(path, config, handler) etc. ---
 
-  function makeMethodHelper<M extends Method>(method: M) {
+  function makeMethodHelper<M extends Method>(method: M): ApiMethodHelper<Auth, E> {
     function helper<
       P extends string,
       B extends AnyArkType | undefined,
@@ -297,12 +333,12 @@ export function createApi<Auth = undefined, E extends Env = Env>(
   }
 
   const apiWithHelpers = api as typeof api & {
-    get: ReturnType<typeof makeMethodHelper>;
-    post: ReturnType<typeof makeMethodHelper>;
-    put: ReturnType<typeof makeMethodHelper>;
-    patch: ReturnType<typeof makeMethodHelper>;
-    del: ReturnType<typeof makeMethodHelper>;
-    delete: ReturnType<typeof makeMethodHelper>;
+    get: ApiMethodHelper<Auth, E>;
+    post: ApiMethodHelper<Auth, E>;
+    put: ApiMethodHelper<Auth, E>;
+    patch: ApiMethodHelper<Auth, E>;
+    del: ApiMethodHelper<Auth, E>;
+    delete: ApiMethodHelper<Auth, E>;
   };
 
   apiWithHelpers.get = makeMethodHelper("GET");

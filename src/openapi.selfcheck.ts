@@ -1,11 +1,14 @@
 /**
  * Self-check for lib/openapi.ts spike.
- * Five assertions:
+ * Seven assertions:
  *   1. /openapi.json emits minimum/maximum in spec
  *   2. Query param coercion works (string "5" → number 5)
  *   3. Bad body returns 400 with error summary (via default onError)
  *   4. Recursive schema: $defs hoisted to components, $ref pointers rewritten
  *   5. Validation errors flow through app.onError (issue #4 regression guard)
+ *   6. debug mode reveals error details
+ *   7. Framework error responses are accurate & controllable (400 on :param, 404 heuristic,
+ *      replace-vs-suppress via explicit responses:{404}) — grilling 06 / spec S2
  */
 
 import { scope, type } from "arktype";
@@ -227,6 +230,57 @@ async function assertDebugMode() {
   if (!body.stack) throw new Error("expected stack in debug mode");
 }
 
+// ── Assertion 7: framework error responses are accurate & controllable ──
+// Grilling 06 / spec S2: 400 auto-doc on `:param` routes (auto-generated
+// request.params validator), 404 ponytail heuristic on `:param`, both sharing
+// one deduped error component. Declaring explicit `responses:{404}` REPLACES
+// the auto 404 (custom schema) rather than suppressing it — guard
+// `if(!responses["404"])` respects the explicit response.
+async function assertFrameworkErrorControl() {
+  const { api, app, docs } = createApi<undefined>({ title: "Framework Errors" });
+
+  // Route 1 — path has :param → auto-generated params validator → auto docs 400 + 404
+  api({ method: "GET", path: "/posts/:id" }, async ({ id }) => ({ id }));
+
+  // Route 2 — explicit responses:{404} replaces the auto 404 schema (not suppress)
+  api(
+    {
+      method: "GET",
+      path: "/docs/:id",
+      responses: { 404: type({ error: "string", reason: "string" }) },
+    },
+    async ({ id }) => ({ id }),
+  );
+
+  // Mount the docs so /openapi.json exposes the spec (createApi does not auto-mount)
+  docs();
+
+  const res = await app.request("/openapi.json");
+  if (res.status !== 200) throw new Error(`spec endpoint returned ${res.status}`);
+  const spec: any = await res.json();
+
+  const posts = spec.paths?.["/posts/{id}"]?.get;
+  if (!posts) throw new Error("GET /posts/{id} not in spec");
+  const posts400 = posts.responses?.["400"];
+  const posts404 = posts.responses?.["404"];
+  if (!posts400) throw new Error("param route missing auto-documented 400");
+  if (!posts404) throw new Error("param route missing auto-documented 404 (ponytail heuristic)");
+  const posts400Ref = posts400.content?.["application/json"]?.schema?.$ref ?? "";
+  if (!posts400Ref.startsWith("#/components/schemas/schema_"))
+    throw new Error(`400 should use shared error component, got ${posts400Ref}`);
+
+  const docsRoute = spec.paths?.["/docs/{id}"]?.get;
+  if (!docsRoute) throw new Error("GET /docs/{id} not in spec");
+  const docs404 = docsRoute.responses?.["404"];
+  if (!docs404)
+    throw new Error("explicit responses:{404} must still document 404 (replace, not suppress)");
+  const docs404Schema = docs404.content?.["application/json"]?.schema;
+  if (!docs404Schema?.properties?.reason)
+    throw new Error("explicit 404 should use the custom schema (replaces auto)");
+  if (docs404Schema?.$ref === posts400Ref)
+    throw new Error("explicit 404 must not reuse the auto error schema");
+}
+
 // ── Run ───────────────────────────────────────────────────────────
 console.log("=== OpenAPIHono spike self-check ===");
 console.log();
@@ -237,8 +291,9 @@ await check("Validation error returns 400", assertValidation);
 await check("Recursive schema $ref rewriting", assertRefRewriting);
 await check("Validation errors reach app.onError", assertValidationErrorReachesOnError);
 await check("debug mode reveals error details", assertDebugMode);
+await check("Framework error responses are accurate & controllable", assertFrameworkErrorControl);
 
 console.log();
-console.log(`Result: ${passed}/6 passed, ${failed} failed`);
+console.log(`Result: ${passed}/7 passed, ${failed} failed`);
 
 if (failed > 0) process.exit(1);
