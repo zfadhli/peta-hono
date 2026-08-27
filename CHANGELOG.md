@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-08-27
+
+### Fixed
+
+- Method-shorthand overload collapse — `api.get/post/put/patch/del/delete(path, config, handler)` now uses an explicit two-overload `ApiMethodHelper<Auth,E>` interface instead of `ReturnType<typeof makeMethodHelper>`. Both `auth?: undefined` → `ReqFor` and `auth: string` → `ReqFor & AuthField<Auth>` overloads are preserved, so on a no-auth app (`createApi<undefined>`) reading `auth` in a shorthand handler is a type error, identical to the classic `api({ method, path, auth })` form. Closes #20.
+- Framework-error documentation contract — `_buildResponses` auto-doc comment now states 400 applies to validated `request.body/query/headers/params` **or** a path containing `:param` (auto-generated `request.params` via `hasParamTokens`), and the guard `if(!responses["400"])` respects an explicit `responses:{400: schema}` (replaces the auto doc rather than suppressing it). `ponytail:` marker added for the benign 400-on-`:param` false-positive. Closes #21.
+
+### Added
+
+- Regression guard `src/typecheck.selfcheck.ts` (typecheck-only, excluded from `dist/`) — `@ts-expect-error` assertions pin the no-auth negative case (`auth` must not be readable in a handler) for both the classic and shorthand forms; `tsc` fails if the overload collapse recurs.
+- `src/openapi.selfcheck.ts` `assertFrameworkErrorControl` — asserts 400 auto-doc on `:param`, 404 ponytail heuristic, shared deduped error component, and that explicit `responses:{404}` replaces rather than suppresses the auto schema.
+
 ## [0.5.1] - 2026-08-26
 
 ### Fixed
