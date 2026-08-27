@@ -11,7 +11,7 @@
 | 007 | Framework errors 400/401/404/500 + ponytail 404 | 2026-08-26 | Accepted |
 | 008 | Deep query/header coercion before validation | 2026-08-26 | Accepted |
 | 009 | Method shorthands, Method typing, operationId/deprecated, Env generic (v0.5.0) | 2026-08-26 | Accepted |
-| 010 | Extract `PARAM_TOKEN_RE` and share param parsing | 2026-08-26 | Proposed |
+| 010 | Extract `PARAM_TOKEN_RE` and share param parsing | 2026-08-26 | Accepted — implemented |
 | 011 | Split `src/openapi.ts` by responsibility (deferred incremental) | 2026-08-26 | Proposed |
 
 Glossary: [`../glossary.md`](../glossary.md)

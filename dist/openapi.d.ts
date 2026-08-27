@@ -34,6 +34,8 @@ export interface RouteConfig {
     operationId?: string;
     /** Mark operation as deprecated in OpenAPI docs. */
     deprecated?: boolean;
+    /** Suppress the auto-documented 400 that path `:param` routes get (noise). */
+    hide400?: boolean;
 }
 /** Single error policy — shared by OpenAPIHono and createApi (via createErrorHandler). */
 export type ErrorHandler = (err: Error, c: Context) => Response | Promise<Response>;

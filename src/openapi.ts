@@ -95,6 +95,8 @@ export interface RouteConfig {
   operationId?: string;
   /** Mark operation as deprecated in OpenAPI docs. */
   deprecated?: boolean;
+  /** Suppress the auto-documented 400 that path `:param` routes get (noise). */
+  hide400?: boolean;
 }
 
 /** Single error policy — shared by OpenAPIHono and createApi (via createErrorHandler). */
@@ -107,18 +109,24 @@ export function createErrorHandler(debug?: boolean): ErrorHandler {
     }
     // ponytail: logs the full error server-side, sends generic message to client.
     console.error(err);
-    const isProd =
-      typeof process !== "undefined" &&
-      (process as unknown as { env?: Record<string, string> }).env?.NODE_ENV === "production";
-    if (debug && isProd) {
-      console.warn("[peta-hono] debug enabled in production — redacting error details");
-    }
-    const effectiveDebug = !!debug && !isProd;
+    const nodeEnv =
+      typeof process !== "undefined"
+        ? (process as unknown as { env?: Record<string, string> }).env?.NODE_ENV
+        : undefined;
+    // Debug is DEV-ONLY. Reveal details only under an explicit development (or
+    // test) signal. In a production deploy where NODE_ENV is absent — Bun/Deno/
+    // edge runtimes, or a Node process that forgets to set it — the safe default
+    // is to WITHHOLD details rather than leak them (the old gate inverted this:
+    // `isProd = NODE_ENV==="production"` leaked when NODE_ENV was unset).
+    const effectiveDebug = !!debug && (nodeEnv === "development" || nodeEnv === "test");
     if (effectiveDebug) {
       const message = err instanceof Error ? err.message : String(err);
       const body: Record<string, unknown> = { error: message };
       if (err instanceof Error && err.stack) body.stack = err.stack;
       return c.json(body, 500);
+    }
+    if (debug && nodeEnv === "production") {
+      console.warn("[peta-hono] debug enabled in production — redacting error details");
     }
     return c.json({ error: "Internal Server Error" }, 500);
   };
@@ -384,7 +392,14 @@ export class OpenAPIHono<
     // Default error handler — single chokepoint for validation errors (thrown
     // by arktypeValidator) and any other thrown errors. Uses the shared
     // createErrorHandler policy; createApi() overrides with debug-aware variant.
-    this.onError(createErrorHandler());
+    const defaultErrorHandler = createErrorHandler();
+    this.onError(defaultErrorHandler);
+    // Unmatched-route 404 — route through the same error policy so it returns
+    // application/json {error} instead of Hono's default text/plain "404 Not
+    // Found", unifying the two 404 shapes (fail.notFound() and unmatched route)
+    // through the single chokepoint. The default handler (no debug) is used so
+    // there are no details to leak; createApi()'s debug-aware onError is separate.
+    this.notFound((c) => defaultErrorHandler(new APIError(404, "Not Found"), c));
   }
 
   /** Register an API endpoint with ArkType validation and OpenAPI metadata. */
@@ -455,7 +470,11 @@ export class OpenAPIHono<
       // If handler returned a Response directly, use it as-is
       if (result instanceof Response) return result;
 
-      // Determine status: explicit status, first 2xx/3xx in declared responses, or 200
+      // Determine status: explicit status first, else the LOWEST declared
+      // 2xx/3xx, else 200. The "lowest" (not "first") matters because
+      // Object.keys() enumerates integer-like keys in ascending numeric order,
+      // so with {200, 201} declared the lowest wins regardless of source order.
+      // When more than one 2xx/3xx is declared, set `status` explicitly.
       const successCode =
         config.status?.toString() ??
         Object.keys(config.responses ?? {}).find((k) => k.startsWith("2") || k.startsWith("3")) ??
@@ -591,7 +610,10 @@ export class OpenAPIHono<
       }
     }
 
-    // Determine success code: explicit status, first 2xx/3xx in declared responses, or 200
+    // Determine success code: explicit status, else the LOWEST declared 2xx/3xx
+    // (JS enumerates integer-like keys in ascending order, so "first" in source
+    // order is meaningless), else 200. When multiple 2xx/3xx are declared, set
+    // `status` explicitly to get a non-lowest default.
     const successCode =
       config.status?.toString() ??
       Object.keys(responses).find((k) => k.startsWith("2") || k.startsWith("3")) ??
@@ -610,8 +632,9 @@ export class OpenAPIHono<
     //                 arktypeValidator("param") (b6354f3), so it's intentional; benign
     //                 false-positive if the param string never actually 400s. Guard
     //                 `if (!responses["400"])` respects explicit `responses:{400: schema}`,
-    //                 which REPLACES the auto doc rather than suppressing it. Ceiling:
-    //                 explicit `hide400` opt-out if the noise matters.
+    //                 which REPLACES the auto doc. Set `hide400: true` to suppress the
+    //                 auto 400 entirely (e.g. a pure `:param` route); a user-declared
+    //                 `responses:{400}` is still honored.
     // 401 Unauthorized — any endpoint behind a registered auth scheme
     const errorRef = await this._getErrorSchemaRef();
     const addFrameworkError = async (code: number, description: string) => {
@@ -626,7 +649,7 @@ export class OpenAPIHono<
       }
     };
 
-    if (!responses["400"]) {
+    if (!config.hide400 && !responses["400"]) {
       const hasValidation =
         !!config.request?.body ||
         !!config.request?.query ||

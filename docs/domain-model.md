@@ -36,7 +36,7 @@
 - [x] Extract `src/paths.ts` first (ADR-010) — 1 constant + 2 functions, zero risk. **Done 2026-08-26** — `src/paths.ts` canonical, `src/index.ts` barrel now re-exports `normalizeMethod` (patch 0.5.1). `toOapiPath` header ponytail moved to `_addObjectParams`.
 - [x] Header lowercasing user-facing doc — README `How it works` + `Features` + AGENTS `Key patterns` now state lowercase keys; glossary `Coercion`/`Ponytail` amended (see 2026-08-26 patch).
 - [x] Fix shorthand overload collapse — `ApiMethodHelper<Auth,E>` replaces `ReturnType<typeof makeMethodHelper>` (ADR-009, grilling 02) — negative `api.get` with `auth` on `createApi<undefined>` now errors, matching classic `api()`.
-- [x] Clarify 400 auto-doc on param routes — `_buildResponses` `hasParamTokens` intentionally documents `400` for `GET /:id` (b6354f3); `src/openapi.ts` comment + ADR-007 now state `OR path has :param` and `Guard if(!responses["400"])` suppresses only via explicit `responses:{400}` ponytail (grilling 06).
+- [x] Clarify 400 auto-doc on param routes — `_buildResponses` `hasParamTokens` intentionally documents `400` for `GET /:id` (b6354f3); `src/openapi.ts` comment + ADR-007 now state `OR path has :param` and `Guard if(!responses["400"])` respects explicit `responses:{400}`. **2046-08-27 (issue #05): `hide400` opt-out added** so a pure `:param` route can suppress the auto 400 entirely.
 - [ ] Extract `src/errors.ts` — move `APIError`+`createErrorHandler`+`fail` there; re-export from `openapi.ts`/`api.ts` for barrel stability.
 - [ ] Extract `src/validation.ts` — after `errors.ts` exists (breaks cycle).
 - [ ] Defer `src/registry.ts` split until `openapi.ts` >800 LOC or second divergent change (ADR-011 — Proposed, not now).
@@ -56,7 +56,7 @@ Source of truth for naming; ADRs reference these terms. See `docs/glossary.md` f
 | **OapiPath** | OpenAPI | VO | OpenAPI form `/{param}` via `toOapiPath(path)` | `:name`→`{name}`, `:name{regex}`→`{name}`, `:name?`→`{name}`, `*`→`{wildcard}` |
 | **PARAM_TOKEN_RE** | Routing | VO | `/ :([a-zA-Z0-9_]+)(?:\{[^}]+\})?(\?)? /g` — shared constant for `parseParamTokens` | Captures `name` + `optional=!!?`. See ADR-010 |
 | **Coercion** | Validation | Policy | `coerceDeep(schema, data)` + `coerceValue(prop, raw, defs)` deep walk of `JsonSchema` before `schema(data)`; `string→number/boolean/array/object` | Guards: `raw===undefined` or `trim()===""` never coerce → preserved for 400. Array single `"1"`→`[1]` |
-| **ErrorHandler** | Kernel | Policy | `createErrorHandler(debug?) => (err,c)=>Response` — single chokepoint: `APIError→c.json({error},status)` else `console.error` + prod-gated `debug && !isProd` stack | `isProd = process.env.NODE_ENV==="production"`; warns if `debug&&isProd` |
+| **ErrorHandler** | Kernel | Policy | `createErrorHandler(debug?) => (err,c)=>Response` — single chokepoint: `APIError→c.json({error},status)` else `console.error` + dev-gated `debug && (NODE_ENV==="development"||"test")` stack | `debug` is dev-only — **withholds** details (generic 500) unless NODE_ENV is explicitly development/test; warns if `debug && NODE_ENV==="production"` |
 | **OperationId** | OpenAPI | VO | Unique `operationId` per `OpenAPIOperation` | Default `method_oapiPath` (`/`→`_`, `{}` stripped); collision → `_2`,`_3` via `seenOperationIds:Set` + `baseCounts:Map`; overridable via `config.operationId` |
 | **ComponentRegistry** | OpenAPI | Aggregate | `{schemas:Map<string,JsonSchema>, securitySchemes:Map<string,AuthScheme>}` — hoists `$defs` to stable names | Key `schema_<sha1Hex(normalizeRefs(JSON.stringify(def))).slice(0,12)>` |
 | **StoredRoute** | OpenAPI | Entity | Persisted `{method:string(lower), oapiPath:string, config:RouteConfig, handler:RouteHandler}` in `_routes[]` insertion order | Drives both Hono dispatch (`this.on`) and `_buildSpec` iteration |
@@ -69,7 +69,7 @@ Source of truth for naming; ADRs reference these terms. See `docs/glossary.md` f
 
 | ADR | Title | Status | One-line decision |
 |-----|-------|--------|-------------------|
-| [010](./adr/010-extract-param-token-re.md) | Extract `PARAM_TOKEN_RE` and share param parsing | **Proposed** | Single `src/paths.ts` constant + `parseParamTokens(path)` + re-exports; delete duplicated `matchAll` in `api.ts`/`openapi.ts`. |
+| [010](./adr/010-extract-param-token-re.md) | Extract `PARAM_TOKEN_RE` and share param parsing | **Accepted — implemented** | Single `src/paths.ts` constant + `parseParamTokens(path)` + re-exports; delete duplicated `matchAll` in `api.ts`/`openapi.ts`. |
 | [011](./adr/011-split-openapi-by-responsibility.md) | Split `src/openapi.ts` by responsibility | **Proposed — deferred incremental** | Do **not** big-bang split at 700 LOC; extract `paths.ts` + `errors.ts` now, `validation.ts` next, defer `registry.ts` until >800 LOC / second divergent change. Justify: orchestration cohesion outweighs SRP cost today. |
 
 Full ADRs: `docs/adr/010-*.md`, `docs/adr/011-*.md`.
@@ -110,7 +110,7 @@ StoredRoute --1..1--> OpenAPIOperation (per _buildSpec iteration)
 ### Value objects & entities (sketch)
 
 ```ts
-// src/paths.ts — pure, no deps
+// src/paths.ts — pure, no deps (IMPLEMENTED, ADR-010)
 export const SUPPORTED_METHODS = ["GET","POST","PUT","PATCH","DELETE"] as const;
 export type HttpMethod = typeof SUPPORTED_METHODS[number];
 export type Method = HttpMethod | Lowercase<HttpMethod> | (string & {});
@@ -120,26 +120,26 @@ export function parseParamTokens(path: string): ParamToken[]; // matchAll(PARAM_
 export function normalizeMethod(m: string): string; // lower, validate
 export function toOapiPath(path: string): string;   // :x→{x}, *→{wildcard}
 
-// src/errors.ts — kernel, no deps
+// src/errors.ts — kernel, no deps (PROPOSED — not yet extracted; currently in openapi.ts + api.ts)
 export class APIError extends Error { constructor(public status: ContentfulStatusCode, msg: string) }
 export type ErrorHandler = (err: Error, c: Context) => Response | Promise<Response>;
 export function createErrorHandler(debug?: boolean): ErrorHandler;
 export const fail: Record<"badRequest"|"notFound"|..., (msg?:string)=>APIError>;
 
-// src/validation.ts — depends on errors + ArkType
+// src/validation.ts — depends on errors + ArkType (PROPOSED — not yet extracted; currently in openapi.ts)
 export type ArkType = Type<any,any>;
 export function coerceDeep(schema: ArkType, data: Record<string,unknown>): Record<string,unknown>;
 export function coerceValue(expected: JsonSchema, raw: unknown, defs?: Record<string,JsonSchema>): unknown;
 export function arktypeValidator(target:"json"|"query"|"header"|"param", schema: ArkType): MiddlewareHandler;
 
-// src/registry.ts — pure + Web Crypto
+// src/registry.ts — pure + Web Crypto (PROPOSED — deferred until openapi.ts > 800 LOC / second divergent change, ADR-011)
 export type ComponentRegistry = { schemas: Map<string,JsonSchema>; securitySchemes: Map<string,AuthScheme> };
 export function rewriteRefs(node: unknown, rename: Map<string,string>): void;
 export function sha1Hex(data: string): Promise<string>;
 export function schemaToOA(schema: ArkType, registry: ComponentRegistry): Promise<JsonSchema>;
 
-// src/openapi.ts — orchestrator
-export interface RouteConfig { method: Method; path: string; request?:{body?,query?,headers?,params?:ArkType}; responses?:Record<number,ArkType>; tags?; summary?; description?; security?; middleware?; status?; operationId?; deprecated? }
+// src/openapi.ts — orchestrator (IMPLEMENTED)
+export interface RouteConfig { method: Method; path: string; request?:{body?,query?,headers?,params?:ArkType}; responses?:Record<number,ArkType>; tags?; summary?; description?; security?; middleware?; status?; operationId?; deprecated?; hide400? }
 export interface StoredRoute { method: string; oapiPath: string; config: RouteConfig; handler: RouteHandler }
 export type RouteHandler = (req: Record<string,unknown>)=> Record<string,unknown>|null | Promise<...>;
 export class OpenAPIHono<E extends Env> extends Hono<E> {
@@ -150,11 +150,11 @@ export class OpenAPIHono<E extends Env> extends Hono<E> {
   private _buildSpec(...): Promise<OpenAPISpec>; private _buildResponses(...); private _addObjectParams(...);
 }
 
-// src/api.ts — facade, generic inference
+// src/api.ts — facade, generic inference (IMPLEMENTED)
 export type ParamRecord<S extends string> = ...; // :id? → {id?:string}
 export type ParamsFromPath<P extends string> = ...; // recursive ParamRecord & ...
 export type ReqFor<P,B,Q,H,E extends Env> = ParamsFromPath<P> & {body?:ArkInfer<B>} & {query?:ArkInfer<Q>} & {headers?:ArkInfer<H>} & {c:Context<E>} & AuthField<Auth>;
-export type RouteFields<P,B,Q,H> = { method:Method; path:P; body?:B; query?:Q; headers?:H; responses?; middleware?; tags?; summary?; description?; status?; operationId?; deprecated?; auth?:string };
+export type RouteFields<P,B,Q,H> = { method:Method; path:P; body?:B; query?:Q; headers?:H; responses?; middleware?; tags?; summary?; description?; status?; operationId?; deprecated?; hide400?; auth?:string };
 export type ApiMethodHelper<Auth,E extends Env> = {
   <P extends string,B,Q,H>(path:P, config:RouteFieldsWithoutMethodPath<P,B,Q,H> & {auth?:undefined}, handler:(req:ReqFor<P,B,Q,H,E>)=>any): void;
   <P extends string,B,Q,H>(path:P, config:RouteFieldsWithoutMethodPath<P,B,Q,H> & {auth:string}, handler:(req:ReqFor<P,B,Q,H,E> & AuthField<Auth>)=>any): void;
@@ -168,13 +168,13 @@ export function createApi<Auth=undefined,E extends Env>(opts?:{title?,version?,d
 | Stage | Derived field | How | Invariant |
 |-------|---------------|-----|-----------|
 | `RouteFields → RouteConfig` | `request.params` | If `parseParamTokens(path).length>0` and no explicit `params`, `type(Object.fromEntries(tokens.map(t=>[t.name, t.optional?"string?":"string"]))` | Type-level `ParamsFromPath` and runtime `parseParamTokens` use **same** `PARAM_TOKEN_RE` |
-| `RouteFields → RouteConfig` | `security` | `auth && authSchemes.has(auth) ? [{[auth]:[]}] : undefined` | No phantom lock icon |
+| `RouteFields → RouteConfig` | `security` | Every registered `auth()` publishes a security scheme (default `{type:"http",scheme:"bearer"}` when the `scheme` arg is omitted); `config.auth` → `[{[auth]:[]}]` | A route with `{auth}` is ALWAYS documented protected (401 + security + matching scheme); no dangling security ref |
 | `RouteConfig → StoredRoute` | `method` | `normalizeMethod(config.method)` → lower | Throws on unsupported |
 | `RouteConfig → StoredRoute` | `oapiPath` | `toOapiPath(config.path)` | `:x{regex}?`→`{x}`, `*`→`{wildcard}`; used as `paths` key |
 | `RouteConfig → StoredRoute` | `paramTokens` | `parseParamTokens(config.path)` — used for validator + `req` flattening | Re-derived per `openapi()`, not stored |
 | `StoredRoute → Operation` | `operationId` | `config.operationId ?? "${method}_${oapiPath.replace(/[{}]/g,"").replace(/\//g,"_")}"` + dedup `Set`+`Map` → `_2` | Unique across spec |
 | `StoredRoute → Operation` | `parameters[]` | `_addObjectParams` via `schemaToOA` then `json.properties` + `required` set; header names lowercased (`paramName = name.toLowerCase()` when `in==="header"`) | Uses `schemaToOA` (hoisted), not raw `toJsonSchema`. **Invariant:** header schemas MUST use lowercase keys; `coerceDeep` does NOT auto-lowercase (strict 400). |
-| `StoredRoute → Operation` | `responses` | `_buildResponses`: user `responses` + framework `400/401/404/500` with `if(!responses[key])` guard + single `getErrorSchemaRef()`; `400` triggers on `request.body/query/headers/params` **or** `hasParamTokens(path)` (auto-generated params) | Explicit `responses:{400}` replaces auto; explicit `responses:{404}` suppresses heuristic (ponytail grilling 06) |
+| `StoredRoute → Operation` | `responses` | `_buildResponses`: user `responses` + framework `400/401/404/500` with `if(!responses[key])` guard + single `getErrorSchemaRef()`; `400` triggers on `request.body/query/headers/params` **or** `hasParamTokens(path)` (auto-generated params), suppressed by `hide400`; `401` triggers on any `config.security`; success code = `status ?? lowest 2xx/3xx ?? 200` | Explicit `responses:{400}` replaces auto (and `hide400` suppresses it); explicit `responses:{404}` suppresses heuristic; success default is the LOWEST 2xx/3xx (set `status` for non-lowest) |
 | `StoredRoute → Hono` | dispatch | `this.on(method, path, ...mws, handlerWrapper)` via `dispatch` cast | `handlerWrapper` flattens `valid("param")` → `req`, injects `auth`/`c`, maps `null→204`, `Response→passthrough`, else `c.json` |
 
 ### Handler runtime shape
@@ -191,7 +191,7 @@ type HandlerReq = {
 }
 ```
 
-**Lifecycle:** `StoredRoute` is append-only; `_buildSpec` is per-request pure except lazy `_errorSchemaRef` (`Map.setIfAbsent` safe). No `notFound` chokepoint — `app.notFound` bypasses `onError` (known gap, ADR-005).
+**Lifecycle:** `StoredRoute` is append-only; `_buildSpec` is per-request pure except lazy `_errorSchemaRef` (`Map.setIfAbsent` safe). Unmatched-route `app.notFound` now returns `application/json {error}` via the shared `createErrorHandler` policy (unified with `fail.notFound`) — the no-`notFound`-chokepoint gap is closed (formerly ADR-005 known gap).
 
 ---
 

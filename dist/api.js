@@ -20,9 +20,15 @@ export const fail = {
     serviceUnavailable: (msg = "Service Unavailable") => new APIError(503, msg),
     gatewayTimeout: (msg = "Gateway Timeout") => new APIError(504, msg),
 };
-/** Alias for `fail` — noun form for callers who prefer `throw errors.notFound()`. */
+/**
+ * @deprecated Use `fail` instead — `errors` is a pure synonym kept for callers
+ * who prefer the noun form. The single canonical helper is `fail`.
+ */
 export const errors = fail;
-/** Alias for `fail` — explicit HTTP error helpers. */
+/**
+ * @deprecated Use `fail` instead — `httpErrors` is a pure synonym kept for
+ * backward compatibility. The single canonical helper is `fail`.
+ */
 export const httpErrors = fail;
 // --- Create the API builder ---
 /**
@@ -66,10 +72,14 @@ export function createApi(opts = {}) {
             await next();
         };
         auths.set(name, wrapped);
-        if (scheme) {
-            authSchemes.set(name, scheme);
-            app.registerSecurityScheme(name, scheme);
-        }
+        // Every registered auth is ALWAYS documented as protected: a route with
+        // `{auth}` emits 401 + a `security` requirement. The optional `scheme`
+        // only controls the lock-icon KIND; when omitted we publish a default
+        // bearer scheme so the `security` requirement still resolves to a real
+        // `components.securitySchemes` entry (no dangling ref, lock icon shows).
+        const resolvedScheme = scheme ?? { type: "http", scheme: "bearer" };
+        authSchemes.set(name, resolvedScheme);
+        app.registerSecurityScheme(name, resolvedScheme);
     }
     function api(config, handler) {
         // Method normalization is case-insensitive and uses the single
@@ -105,7 +115,10 @@ export function createApi(opts = {}) {
         if (config.middleware) {
             mws.push(...config.middleware);
         }
-        // Attach OpenAPI security if the endpoint uses a registered auth scheme
+        // Attach OpenAPI security whenever the endpoint is auth-gated. `authSchemes`
+        // is always populated (auth() registers a default scheme even without the
+        // `scheme` arg), so every `{auth}` route is documented as protected — 401 +
+        // a `security` requirement + the matching `components.securitySchemes` entry.
         const security = config.auth && authSchemes.has(config.auth) ? [{ [config.auth]: [] }] : undefined;
         app.openapi({
             method,
@@ -120,6 +133,7 @@ export function createApi(opts = {}) {
             status: config.status,
             operationId: config.operationId,
             deprecated: config.deprecated,
+            hide400: config.hide400,
         }, (req) => handler(req));
     }
     // --- Method shorthands: api.get(path, config, handler) etc. ---
@@ -153,7 +167,9 @@ export function createApi(opts = {}) {
             openapi: "3.0.0",
             info: {
                 title: opts.title ?? "API",
-                version: opts.version ?? "1.0.0",
+                // Default to 0.0.0 rather than a confidently-wrong 1.0.0 for a pre-1.0
+                // library — consumers must override `version` to publish an accurate spec.
+                version: opts.version ?? "0.0.0",
             },
         });
         app.get(resolvedUiPath, apiReference({ spec: { url: specPath } }));

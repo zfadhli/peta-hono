@@ -18,7 +18,10 @@ export declare const fail: {
     serviceUnavailable: (msg?: string) => APIError;
     gatewayTimeout: (msg?: string) => APIError;
 };
-/** Alias for `fail` — noun form for callers who prefer `throw errors.notFound()`. */
+/**
+ * @deprecated Use `fail` instead — `errors` is a pure synonym kept for callers
+ * who prefer the noun form. The single canonical helper is `fail`.
+ */
 export declare const errors: {
     badRequest: (msg?: string) => APIError;
     unauthorized: (msg?: string) => APIError;
@@ -32,7 +35,10 @@ export declare const errors: {
     serviceUnavailable: (msg?: string) => APIError;
     gatewayTimeout: (msg?: string) => APIError;
 };
-/** Alias for `fail` — explicit HTTP error helpers. */
+/**
+ * @deprecated Use `fail` instead — `httpErrors` is a pure synonym kept for
+ * backward compatibility. The single canonical helper is `fail`.
+ */
 export declare const httpErrors: {
     badRequest: (msg?: string) => APIError;
     unauthorized: (msg?: string) => APIError;
@@ -64,9 +70,15 @@ type ParamRecord<S extends string> = S extends `${infer N}{${string}}?` ? {
 /** Build `{ name: string }` / `{ name?: string }` from a path like `/hello/:name` or `/posts/:id?`. */
 type ParamsFromPath<P extends string> = P extends `${string}:${infer Param}/${infer Rest}` ? ParamRecord<Param> & ParamsFromPath<`/${Rest}`> : P extends `${string}:${infer Param}` ? ParamRecord<Param> : {};
 /**
- * The request object the handler receives — inferred from the config generics.
- * Path params are flat top-level keys (Encore-style).
- * Body / query / headers are nested under their own keys.
+ * The request object a handler receives — inferred from the config generics.
+ * Path params are flat top-level keys (Encore-style); body / query / headers are
+ * nested under their own keys.
+ *
+ * Note for consumers: if your editor reports `Property 'auth' does not exist on
+ * type 'ReqFor<...>'`, the route config is missing `auth: "required"` — the
+ * handler only receives `auth` on an app whose routes declare it, or when the app
+ * is registered with `createApi<Auth>`. Add `auth: "required"` to the config (or
+ * register the app with the `Auth` generic) and the property appears.
  */
 type ReqFor<P extends string, B, Q, H, E extends Env = Env> = ParamsFromPath<P> & (B extends AnyArkType ? {
     body: ArkInfer<B>;
@@ -96,6 +108,8 @@ type RouteFields<P extends string, B, Q, H> = {
     status?: number;
     operationId?: string;
     deprecated?: boolean;
+    /** Suppress the auto-documented 400 that path `:param` routes get (noise). */
+    hide400?: boolean;
 };
 /** RouteFields without method/path — used for method shorthands like api.get(path, config, handler) */
 type RouteFieldsWithoutMethodPath<P extends string, B, Q, H> = Omit<RouteFields<P, B, Q, H>, "method" | "path">;

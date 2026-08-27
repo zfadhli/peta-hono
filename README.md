@@ -7,14 +7,17 @@ Write a function, get a typed REST endpoint with auto-generated OpenAPI docs, re
 ## Install
 
 ```bash
-nub add peta-hono
+npm install peta-hono hono arktype
 ```
 
-Requires `hono` and `arktype` as peer dependencies — install them alongside:
+Or with pnpm / bun:
 
 ```bash
-nub add peta-hono hono arktype
+pnpm add peta-hono hono arktype
+bun add peta-hono hono arktype
 ```
+
+`peta-hono` is a normal npm package (`main`/`exports`/`types` point at `dist/`). It requires `hono` and `arktype` as **peer dependencies** — install them alongside. Nub is **only** needed to run this repo's own examples (it resolves `.js` imports to `.ts` at runtime without a build step); it is not a runtime or install dependency of the package.
 
 ## Quickstart (dev with Nub)
 
@@ -90,20 +93,24 @@ Run with `nub index.ts` (or `node index.ts` if you've built the lib).
 
 ## How it works
 
-- **`createApi<Auth, Env>(opts)`** — returns `{ api, auth, docs, app }`. The optional `Auth` generic types the auth context (`req.auth`), and `Env` (Hono `Env`) types `req.c` (`c.var`, `c.env`). Omit both for apps with no auth/typed vars.
+- **`createApi<Auth, Env>(opts)`** — returns `{ api, auth, docs, app }`. The optional `Auth` generic types the auth context (`req.auth`), and `Env` (Hono `Env`) types `req.c` (`c.var`, `c.env`). Omit both for apps with no auth/typed vars. `opts` supports `title` (default `"API"`), `version` (default `"0.0.0"` — a pre-1.0 lib must not claim `1.0.0`), and `debug` (dev-only; see below).
 - **`api(config, handler)`** / **`api.get(path, config, handler)`** — registers a Hono route with OpenAPI metadata. The handler receives a flat request object with types inferred from the ArkType schemas in `config`. Path params (`:name`, `:id?`, `:id{[0-9]+}`) are parsed automatically and appear as top-level keys (optional params like `:id?` are typed as `string | undefined`). When `{ auth: 'name' }` is set, the handler also receives `auth: Auth`. Shorthands `api.get`, `api.post`, `api.put`, `api.patch`, `api.delete` (alias `api.del`) mirror Hono's `app.get` etc. and infer the path param types from the first arg. Config fields:
-  - `method: Method` — HTTP method, typed with autocomplete (`GET`/`get`/etc, case-insensitive via `normalizeMethod`)
+  - `method: Method` — HTTP method, typed with autocomplete (`GET`/`get`/etc, case-insensitive via `normalizeMethod`). The `Method` type includes `(string & {})` as an escape hatch for custom verbs, so a typo like `"GETT"` passes typecheck but throws `Unsupported method` at runtime — `normalizeMethod` is the enforcement point
   - `path: string` — Hono-style path with `:param` tokens
   - `tags?: string[]` — OpenAPI tags for grouping in docs
   - `summary?: string` — operation title in docs
   - `description?: string` — operation description
   - `operationId?: string` — override auto-generated operationId (useful for SDK generation)
   - `deprecated?: boolean` — mark operation as deprecated in spec
-  - `status?: number` — explicit success status (use 204 for No Content; handler returns `null`)
-- **`auth(name, middleware, scheme?)`** — registers a named auth middleware. **Return-based:** `(c: Context<Env>) => Auth` — throw to reject (e.g. `throw fail.unauthorized()`), or return a value that becomes `req.auth` in handlers. Apply via `{ auth: 'name' }` in the api config. Optional `scheme` registers an OpenAPI security scheme (adds lock icon in docs): `{ type: 'http', scheme: 'bearer' }`, `{ type: 'http', scheme: 'basic' }`, or `{ type: 'apiKey', in: 'header', name: 'X-API-Key' }`.
+  - `status?: number` — explicit success status (use 204 for No Content; handler returns `null`). When multiple 2xx/3xx codes are declared in `responses`, the default resolves to the **lowest** 2xx/3xx (JS enumerates integer-like keys in ascending order), so set `status` explicitly to get a non-lowest default
+- **`auth(name, middleware, scheme?)`** — registers a named auth middleware. **Return-based:** `(c: Context<Env>) => Auth` — throw to reject (e.g. `throw fail.unauthorized()`), or return a value that becomes `req.auth` in handlers. Apply via `{ auth: 'name' }` in the api config. The `scheme` argument registers an OpenAPI security scheme and controls the **lock-icon kind**: `{ type: 'http', scheme: 'bearer' }`, `{ type: 'http', scheme: 'basic' }`, or `{ type: 'apiKey', in: 'header', name: 'X-API-Key' }`. **A route with `{ auth }` is always documented as protected** — it emits a `401 Unauthorized` response, a `security` requirement, and the matching `components.securitySchemes` entry — even when `auth()` was registered *without* a `scheme`. When the `scheme` arg is omitted, a default `bearer` scheme is published so the `security` requirement resolves to a real scheme (no dangling reference) and the lock icon shows.
 - **`docs(specPath?, uiPath?)` / `docs({ specPath?, uiPath? })`** — mounts the OpenAPI JSON spec and Scalar docs UI. Both positional (`docs("/openapi.json", "/docs")`) and options-object (`docs({ specPath, uiPath })`) forms are supported.
 - **Header schemas must use lowercase keys** — Hono lowercases incoming headers via Fetch `Headers`; declare `type({ "x-api-key": "string" })` not `type({ "X-Api-Key": "string" })`. The spec emits lowercased header param names so runtime and docs match (`_addObjectParams` lowercases when `in === "header"`).
-- **`fail` / `errors` / `httpErrors`** — throw named HTTP errors: `throw fail.notFound('post not found')`. Aliases `errors` and `httpErrors` are re-exports of `fail` for callers preferring noun forms. Helpers for common codes: `fail.badRequest` (400), `fail.unauthorized` (401), `fail.forbidden` (403), `fail.notFound` (404), `fail.conflict` (409), `fail.unprocessableEntity` (422), `fail.tooManyRequests` (429), `fail.internalServerError` (500), `fail.badGateway` (502), `fail.serviceUnavailable` (503), `fail.gatewayTimeout` (504). Each accepts an optional message (sensible default if omitted). For custom status codes, use `throw new APIError(status, message)` directly.
+- **Path params & `{regex}`** — `:name`, `:id?`, `:id{[0-9]+}` are parsed from the path and typed at the top level. **The `{regex}` in `:param{regex}` is enforced by Hono's router, not the ArkType param validator** — a mismatch produces a 404 (route doesn't match), and the ArkType schema types/validates the segment as `string`.
+- **Success code default** — the handler/status defaults to `status`, else the **lowest** declared 2xx/3xx response, else `200`. Because object keys are enumerated in ascending numeric order, `{ 200, 201 }` and `{ 201, 200 }` both default to `200`; set `status: 201` to get `201`.
+- **`debug` is dev-only** — `createApi({ debug: true })` reveals `{ error, stack }` only when `NODE_ENV=development` (or `test`). In production — including a deploy that forgets to set `NODE_ENV`, or a Bun/Deno/edge runtime without `process` — it **withholds** details by default rather than leaking them. Strip `debug` (or set `NODE_ENV=development`) in dev; never ship it in prod bundles.
+- **Reading `auth` without `{ auth: 'required' }`** — `req.auth` is only present when the route declares `auth` (and the app is registered with `createApi<Auth>`). A no-auth route that reads `auth` fails typecheck with `Property 'auth' does not exist on type 'ReqFor<...>'` — that means the route isn't auth-gated; add `auth: 'required'` to fix it. This negative case is pinned in `src/typecheck.selfcheck.ts`.
+- **`fail`** — throw named HTTP errors: `throw fail.notFound('post not found')`. `fail` is the canonical, single helper. (The `errors` and `httpErrors` aliases are deprecated pure synonyms kept for backward compatibility.) Helpers for common codes: `fail.badRequest` (400), `fail.unauthorized` (401), `fail.forbidden` (403), `fail.notFound` (404), `fail.conflict` (409), `fail.unprocessableEntity` (422), `fail.tooManyRequests` (429), `fail.internalServerError` (500), `fail.badGateway` (502), `fail.serviceUnavailable` (503), `fail.gatewayTimeout` (504). Each accepts an optional message (sensible default if omitted). For custom status codes, use `throw new APIError(status, message)` directly.
 
 Handler returns a plain object (no `c.json()`). The library wraps it in the correct response. Return `null` for 204 No Content.
 
@@ -114,7 +121,9 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
 - Response schemas feed into OpenAPI output documentation
 - Auth middleware — named, reusable, applied per-endpoint, with OpenAPI security schemes
 - **Typed auth context** — `createApi<Auth, Env>()` + return-based `auth()` middleware propagate the authenticated user to handlers as `req.auth` with full type safety; `Env` types `req.c` (`c.var` / `c.env`)
-- **`fail` error helpers** — `throw fail.notFound('...')` for ergonomic typed HTTP errors (11 named status helpers + `APIError` for custom codes; also available as `errors` / `httpErrors`)
+- **`fail` error helpers** — `throw fail.notFound('...')` for ergonomic typed HTTP errors (11 named status helpers + `APIError` for custom codes). `fail` is the canonical helper; `errors` / `httpErrors` are deprecated synonyms.
+- **Accurate default docs** — auth-protected routes always document `401` + a `security` requirement (even when `auth()` is registered without a `scheme`, which defaults to `bearer`); the auto-documented 400 on `:param` routes can be suppressed per-route with `hide400`; `info.version` defaults to `0.0.0` not a misleading `1.0.0`
+- **Unified 404** — unmatched routes return `application/json {error}` through the single error policy, matching `fail.notFound()`
 - Method shorthands — `api.get`, `api.post`, `api.put`, `api.patch`, `api.delete`/`api.del` with full type inference, mirroring Hono idioms; `method` typed as `Method` with case-insensitive handling via `normalizeMethod` (`GET`/`get`/`Get` all work, `import { normalizeMethod } from "peta-hono"`)
 - Header lowercasing — header param names are lowercased in spec and runtime to match Hono's Fetch-Header behavior; declare header schemas with lowercase keys
 - OpenAPI `operationId` / `deprecated` / tags / summary / description for doc grouping and SDK generation
@@ -129,20 +138,28 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
 
 ```
 src/
-  openapi.ts    — OpenAPIHono class, createRoute, arktypeValidator, spec emission
-  api.ts        — createApi, api, auth, docs, APIError
+  openapi.ts    — OpenAPIHono class, arktypeValidator, APIError, OpenAPI spec emission
+  api.ts        — createApi, api, auth, docs (DSL facade)
+  paths.ts      — single source for path & method grammar (PARAM_TOKEN_RE, normalizeMethod, toOapiPath)
   index.ts      — public barrel (re-exports all public API)
 examples/
-  example/      — single-file example app
+  basic/        — single-file example app
     routes.ts     — route definitions
     index.ts      — server entry point
     selfcheck.ts  — runnable end-to-end test suite
   blog/         — multi-file blog API
     setup.ts      — shared createApi() + auth singleton
-    store.ts      — in-memory data store
+    db.ts         — data layer (Drizzle ORM + SQLite)
+    schema.ts     — DB schema
     posts.ts      — post CRUD routes
     comments.ts   — nested comment routes
     index.ts      — server entry
+    selfcheck.ts  — runnable end-to-end test suite
+    spec.snapshot.json — golden OpenAPI spec for regression detection
+  auth/         — peta-auth integration example (register/login/profile/logout)
+    routes.ts     — route definitions
+    index.ts      — server entry
+    types.d.ts    — typed c.var.session augmentation
     selfcheck.ts  — runnable end-to-end test suite
 dist/           — built output (created by `nub run build`)
 ```
@@ -157,16 +174,18 @@ The `examples/blog/` directory demonstrates how to split routes across files. Th
 
 ```ts
 // examples/blog/index.ts
-import './posts.js'      // side effect: registers post routes
-import './comments.js'   // side effect: registers comment routes
+import './posts.js'      // side-effect: registers post routes (REQUIRED)
+import './comments.js'   // side-effect: registers comment routes (REQUIRED)
 import { docs, app } from './setup.js'
 docs()
 serve(app)
 ```
 
+**`import './posts.js'` is a required side-effect import.** The route files register routes by running top-level `api()` calls as a module side effect. The library's `package.json` declares `"sideEffects": false` (correct for the library's own `dist/`, which has none) — but a bundler honoring that flag can **drop** `import './posts.js'` from your app bundle, because the import looks like it has no side effects, **silently losing every route**. Keep a `// side-effect: registers routes` comment on each import, and mark your app's route files as side-effectful (a `sideEffects` override in your app's `package.json`, or a bundler `sideEffects` config) so the routes survive tree-shaking.
+
 **Route import order matters** when you have overlapping paths — Hono matches routes in registration order. List the most specific routes before the less specific ones (`/posts/latest` before `/posts/:id`).
 
-**`docs()` mount order:** `docs()` must be called **after** all route imports — routes register via side-effect `api()` calls on the shared `app` from `setup.ts`. The `setup.ts` singleton (`createApi()` once, export `{ api, auth, docs, app }`) is the protectable pattern for multi-file apps.
+**`docs()` mount order:** `docs()` doesn't strictly need to be the last call — the OpenAPI spec builds **lazily** on the `/openapi.json` request, not at `docs()` call time. What matters for correctness is **route registration order** (Hono matches in registration order), so import your route files before you call `docs()` for clarity. The `setup.ts` singleton (`createApi()` once, export `{ api, auth, docs, app }`) is the protectable pattern for multi-file apps.
 
 **Protecting docs (auth-guarded recipe):** Default `docs()` is unauthenticated (`ponytail: no auth on docs — protect it in production if needed`). For private APIs, guard the spec and UI with auth middleware *before* mounting:
 

@@ -28,9 +28,15 @@ export const fail = {
   gatewayTimeout: (msg = "Gateway Timeout") => new APIError(504, msg),
 };
 
-/** Alias for `fail` — noun form for callers who prefer `throw errors.notFound()`. */
+/**
+ * @deprecated Use `fail` instead — `errors` is a pure synonym kept for callers
+ * who prefer the noun form. The single canonical helper is `fail`.
+ */
 export const errors = fail;
-/** Alias for `fail` — explicit HTTP error helpers. */
+/**
+ * @deprecated Use `fail` instead — `httpErrors` is a pure synonym kept for
+ * backward compatibility. The single canonical helper is `fail`.
+ */
 export const httpErrors = fail;
 
 // --- Internal type utilities ---
@@ -57,9 +63,15 @@ type ParamsFromPath<P extends string> = P extends `${string}:${infer Param}/${in
     : {};
 
 /**
- * The request object the handler receives — inferred from the config generics.
- * Path params are flat top-level keys (Encore-style).
- * Body / query / headers are nested under their own keys.
+ * The request object a handler receives — inferred from the config generics.
+ * Path params are flat top-level keys (Encore-style); body / query / headers are
+ * nested under their own keys.
+ *
+ * Note for consumers: if your editor reports `Property 'auth' does not exist on
+ * type 'ReqFor<...>'`, the route config is missing `auth: "required"` — the
+ * handler only receives `auth` on an app whose routes declare it, or when the app
+ * is registered with `createApi<Auth>`. Add `auth: "required"` to the config (or
+ * register the app with the `Auth` generic) and the property appears.
  */
 type ReqFor<P extends string, B, Q, H, E extends Env = Env> = ParamsFromPath<P> &
   (B extends AnyArkType ? { body: ArkInfer<B> } : {}) &
@@ -86,6 +98,8 @@ type RouteFields<P extends string, B, Q, H> = {
   status?: number;
   operationId?: string;
   deprecated?: boolean;
+  /** Suppress the auto-documented 400 that path `:param` routes get (noise). */
+  hide400?: boolean;
 };
 
 /** RouteFields without method/path — used for method shorthands like api.get(path, config, handler) */
@@ -178,10 +192,14 @@ export function createApi<Auth = undefined, E extends Env = Env>(
       await next();
     };
     auths.set(name, wrapped);
-    if (scheme) {
-      authSchemes.set(name, scheme);
-      app.registerSecurityScheme(name, scheme);
-    }
+    // Every registered auth is ALWAYS documented as protected: a route with
+    // `{auth}` emits 401 + a `security` requirement. The optional `scheme`
+    // only controls the lock-icon KIND; when omitted we publish a default
+    // bearer scheme so the `security` requirement still resolves to a real
+    // `components.securitySchemes` entry (no dangling ref, lock icon shows).
+    const resolvedScheme = scheme ?? { type: "http", scheme: "bearer" };
+    authSchemes.set(name, resolvedScheme);
+    app.registerSecurityScheme(name, resolvedScheme);
   }
 
   // Overload 1: no auth → req has no `auth` field
@@ -261,7 +279,10 @@ export function createApi<Auth = undefined, E extends Env = Env>(
       mws.push(...config.middleware);
     }
 
-    // Attach OpenAPI security if the endpoint uses a registered auth scheme
+    // Attach OpenAPI security whenever the endpoint is auth-gated. `authSchemes`
+    // is always populated (auth() registers a default scheme even without the
+    // `scheme` arg), so every `{auth}` route is documented as protected — 401 +
+    // a `security` requirement + the matching `components.securitySchemes` entry.
     const security =
       config.auth && authSchemes.has(config.auth) ? [{ [config.auth]: [] as string[] }] : undefined;
 
@@ -279,6 +300,7 @@ export function createApi<Auth = undefined, E extends Env = Env>(
         status: config.status,
         operationId: config.operationId,
         deprecated: config.deprecated,
+        hide400: config.hide400,
       },
       (req) => handler(req as ReqFor<P, B, Q, H, E> & { auth: Auth }),
     );
@@ -367,7 +389,9 @@ export function createApi<Auth = undefined, E extends Env = Env>(
       openapi: "3.0.0",
       info: {
         title: opts.title ?? "API",
-        version: opts.version ?? "1.0.0",
+        // Default to 0.0.0 rather than a confidently-wrong 1.0.0 for a pre-1.0
+        // library — consumers must override `version` to publish an accurate spec.
+        version: opts.version ?? "0.0.0",
       },
     });
     app.get(resolvedUiPath, apiReference({ spec: { url: specPath } }));
