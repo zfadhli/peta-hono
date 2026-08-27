@@ -10,7 +10,11 @@ const { api, auth, docs, app } = createApi<{ user: { id: string } }>({
 
 // Auth middleware: required for write operations, skip for reads.
 // Return-based: throw to reject, return value becomes req.auth in handlers.
-// The third argument registers a Bearer auth security scheme in OpenAPI docs.
+// The third argument registers the OpenAPI security scheme (lock-icon kind). It
+// is OPTIONAL — omit it and the scheme defaults to `bearer`, so every `{auth}`
+// route is still documented as protected (401 + security requirement + matching
+// components.securitySchemes entry). Pass an explicit scheme only to change the
+// lock icon (basic, apiKey, ...).
 auth(
   "required",
   async (c) => {

@@ -32,13 +32,16 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 
 ## Structure
 
-- `src/openapi.ts` — OpenAPIHono class (with default `onError`), arktypeValidator, APIError, ArkType/AuthScheme types, OpenAPI spec emission
+- `src/paths.ts` — single source for path & method grammar (PARAM_TOKEN_RE/PARAM_HAS_RE, parseParamTokens, hasParamTokens, toOapiPath, normalizeMethod, SUPPORTED_METHODS)
+- `src/openapi.ts` — OpenAPIHono class (default `onError` + `notFound`), arktypeValidator, APIError, AuthScheme, createErrorHandler, OpenAPI spec emission (re-exports paths helpers)
 - `src/api.ts` — library: createApi, api, auth, docs, fail (re-exports APIError from openapi.ts)
 - `src/index.ts` — public barrel (re-exports all public API)
-- `src/openapi.selfcheck.ts` — runnable lib integration test
-- `examples/basic/` — single-file example app (hello, things, search)
-- `examples/blog/` — multi-file blog API (posts + comments, setup.ts singleton pattern)
+- `src/openapi.selfcheck.ts` — runnable lib integration test (12 assertions)
+- `src/typecheck.selfcheck.ts` — type-only regression guard (tsc --noEmit; excluded from dist/ build)
+- `examples/basic/` — single-file example app (routes.ts + index.ts + selfcheck.ts; hello, things, search, legacy)
+- `examples/blog/` — multi-file blog API (setup.ts singleton, db.ts + schema.ts, posts.ts + comments.ts, index.ts + selfcheck.ts)
 - `examples/blog/spec.snapshot.json` — golden OpenAPI spec for regression detection
+- `examples/auth/` — peta-auth integration example (routes.ts + index.ts + types.d.ts + selfcheck.ts)
 
 ## Conventions
 
@@ -53,16 +56,21 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 
 ## Key patterns
 
-- `createApi()` returns a closure; route files import `api` from a shared `setup.ts`
+- `createApi<Auth, Env>({ title?, version?, debug? })` returns `{ api, auth, docs, app }`. `version` defaults to `"0.0.0"` (a pre-1.0 lib must not falsely claim `1.0.0`); `debug` is dev-only. Route files import `api` from a shared `setup.ts`.
 - Routes register via top-level `api()` calls (side effects)
 - Handler receives flat request object: path params at top level, body/query/headers nested
 - Handler returns plain object → library wraps in `c.json()`. Return `null` → `c.body(null, status)` for 204
 - `APIError(status, message)` for typed HTTP errors (status is `ContentfulStatusCode`)
-- `auth(name, mw, scheme?)` registers middleware + optional OpenAPI security scheme
-- All errors — handler-thrown `APIError`, validator failures, unexpected throws — route through `app.onError` (single chokepoint). `OpenAPIHono` registers a default `onError`; `createApi()` overrides it with its own policy
+- `fail` is the canonical error helper — `throw fail.notFound("...")`. `errors` / `httpErrors` are deprecated pure synonyms (still exported). The 11 named helpers (`fail.badRequest`, `fail.unauthorized`, `fail.forbidden`, `fail.notFound`, `fail.conflict`, `fail.unprocessableEntity`, `fail.tooManyRequests`, `fail.internalServerError`, `fail.badGateway`, `fail.serviceUnavailable`, `fail.gatewayTimeout`) live in `src/api.ts`.
+- `auth(name, mw, scheme?)` registers middleware + an OpenAPI security scheme. The `scheme` arg defaults to `bearer` if omitted; every `{auth}` route is **always documented as protected** — it emits a `401` response, a `security` requirement, and the matching `components.securitySchemes` entry.
+- All errors — handler-thrown `APIError`, validator failures, unexpected throws — route through `app.onError` (single chokepoint). `OpenAPIHono` registers a default `onError`; `createApi()` overrides it with its own policy. The `OpenAPIHono` ctor also registers `this.notFound(...)` so an unmatched route returns `application/json {error:"Not Found"}` via the shared `createErrorHandler` policy — unifying the 404 shape with `fail.notFound()`.
 - `arktypeValidator` throws `APIError(400, summary)` on validation failure (does not return a `Response`) so `onError` sees validation errors
+- `createErrorHandler(debug?)` is **dev-only** — it reveals `{ error, stack }` only when `NODE_ENV` is explicitly `development` or `test`; otherwise (production, or `NODE_ENV` absent on Bun/Deno/edge) it redacts to `{"error":"Internal Server Error"}`. `createApi({ debug: true })` wires this; never rely on `NODE_ENV === "production"` (the old gate leaked when unset).
+- `hide400?: boolean` (on `RouteConfig`/`RouteFields`) suppresses the auto-documented `400` that any `:param` route gets (path params always pass `string` validation → benign noise). A user-declared `responses: {400}` still survives; the always-on `500` is untouched.
+- Success code default: `status ?? lowest declared 2xx/3xx ?? 200`. JS enumerates integer-like keys in ascending numeric order, so `{200, 201}` and `{201, 200}` both yield `200` — set `status` explicitly for a non-lowest default (e.g. `status: 201`). Handlers return `null` for 204.
 - Route import order matters for overlapping paths — more specific routes first
-- `docs()` must be called **after** all route imports (route files register via side-effect `api()` calls on the shared `app` from `setup.ts`). The `setup.ts` singleton (`createApi()` once, export `{ api, auth, docs, app }`) is the protectable pattern for multi-file apps.
+- `docs()` does **not** need to be the last call — the OpenAPI spec builds **lazily** on the `/openapi.json` request, not at `docs()` time. What matters for correctness is **route registration order** (Hono matches in registration order), so import your route files before `docs()` for clarity; the `setup.ts` singleton (`createApi()` once, export `{ api, auth, docs, app }`) is the protectable pattern for multi-file apps.
+- Multi-file route imports must be **side-effect imports** — `import "./posts.js"` in the entry runs top-level `api()` calls to register routes. The library declares `"sideEffects": false` (true for its own `dist/`), so a bundler honoring it may **drop** that import and silently lose routes — comment each import (`// side-effect: registers routes`) and mark your app's route files side-effectful.
 - Default `docs()` is unauthenticated (`ponytail: no auth on docs — protect it in production if needed` in `examples/basic/routes.ts`). For private APIs, guard docs with auth middleware before mounting:
   ```ts
   // auth-guarded docs — mount only for authenticated users

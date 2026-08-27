@@ -8,7 +8,9 @@ const { api, auth, docs, app } = createApi<{ user: { id: string } }>({
 
 // --- Auth middleware --------------------------------------------------------
 // Return-based: throw to reject, return value becomes req.auth in handlers.
-// The third argument registers a Bearer auth security scheme in OpenAPI docs.
+// The third argument registers the OpenAPI security scheme (lock-icon kind) and
+// is OPTIONAL — omit it and the scheme defaults to `bearer`, so every `{auth}`
+// route is still documented as protected (401 + security + securitySchemes).
 
 auth(
   "required",

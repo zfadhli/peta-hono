@@ -59,7 +59,8 @@ export function createApi(opts = {}) {
     const app = new OpenAPIHono();
     // Global error handler — single chokepoint via shared createErrorHandler policy.
     // Replaces the default handler installed by OpenAPIHono with a debug-aware variant
-    // that is safely gated by NODE_ENV=production (warns and redacts in prod).
+    // that reveals `{ error, stack }` only under an explicit NODE_ENV=development|test
+    // (dev-only), and redacts to `{"error":"Internal Server Error"}` otherwise.
     app.onError(createErrorHandler(opts.debug));
     const auths = new Map();
     const authSchemes = new Map();

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-08-27
+
+### Changed
+
+- **Docs accuracy** — reconcile `README`, `AGENTS.md`, the `docs/` glossary/domain-model/ADRs, and the example apps with the shipped v0.5.3 behavior. `AGENTS.md` now reflects the real tree (`src/paths.ts`, `src/typecheck.selfcheck.ts`, `examples/auth/`), softens the `docs()` ordering (the spec builds lazily on `/openapi.json`; route registration order is what matters), and documents the default-bearer auth scheme (#03), the unified 404 ctor `notFound` (#04), `hide400` (#05), the dev-only `debug` gate (#06), the lowest-2xx/3xx success-code default (#08), `fail` as canonical (#09), and the `"sideEffects": false` side-effect-import risk. The example apps got comment-only notes (no behavior change) on the optional `scheme` arg and the lazy-spec `docs()` ordering. Spec snapshot unchanged — no regeneration required.
+
+### Fixed
+
+- **Stale comment in `src/api.ts`** — the debug-gate prose still described the error handler as gated by `NODE_ENV=production`; corrected to the v0.5.3 (#06) dev-only gate (reveals `{ error, stack }` only under `NODE_ENV=development|test`, redacts otherwise).
+
 ## [0.5.3] - 2026-08-27
 
 ### Fixed

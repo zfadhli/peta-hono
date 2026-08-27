@@ -6,8 +6,10 @@ import "./comments.js";
 import { serve } from "@hono/node-server";
 import { app, docs } from "./setup.js";
 
-// Mount docs AFTER all routes are registered — options-object form
-// (positional `docs("/openapi.json", "/docs")` still works)
+// Mount docs. The spec builds lazily on the /openapi.json request, so docs()
+// need not be the last call — what matters is that the route files above were
+// imported first (their top-level api() calls register routes; Hono matches in
+// registration order). Options-object form; positional docs() also works.
 docs({ specPath: "/openapi.json", uiPath: "/docs" });
 
 serve(app, (info) => {
