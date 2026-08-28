@@ -1,12 +1,35 @@
 import { apiReference } from "@scalar/hono-api-reference";
 import { type Type, type } from "arktype";
 import type { Context, Env, MiddlewareHandler } from "hono";
-import { APIError, type AuthScheme, createErrorHandler, OpenAPIHono } from "./openapi.js";
+import {
+  type AuthStrategySpec,
+  buildAuthStrategy,
+  buildJwtStrategy,
+  buildOAuthStrategy,
+  buildSessionStrategy,
+  type FlowApp,
+  type JwtStrategy,
+  type JwtStrategyOptions,
+  type OAuthStrategy,
+  type OAuthStrategyOptions,
+  type SessionStrategy,
+  type SessionStrategyOptions,
+  type StrategyFor,
+} from "./auth/index.js";
+import {
+  APIError,
+  type AuthScheme,
+  createErrorHandler,
+  OpenAPIHono,
+  type SecurityScheme,
+} from "./openapi.js";
 import { type Method, normalizeMethod, parseParamTokens } from "./paths.js";
 
 export type { HttpMethod, Method } from "./paths.js";
-// Re-export AuthScheme so consumers can import it from api.ts as before
-export type { AuthScheme };
+// Re-export AuthScheme (narrow input) + SecurityScheme (wide emitted) so
+// consumers can import them from api.ts as before. AuthScheme is what you pass
+// to auth(); SecurityScheme is what the library emits for securitySchemes.
+export type { AuthScheme, SecurityScheme };
 // Re-export APIError (defined in openapi.ts) so the public barrel keeps a
 // stable shape via api.ts. See issue #4: APIError moved to openapi.ts so the
 // validator can throw it without a circular import.
@@ -182,26 +205,82 @@ export function createApi<Auth = undefined, E extends Env = Env>(
   app.onError(createErrorHandler(opts.debug));
 
   const auths = new Map<string, MiddlewareHandler>();
-  const authSchemes = new Map<string, AuthScheme>();
+  const authSchemes = new Map<string, SecurityScheme>();
 
-  function auth(name: string, mw: (c: Context<E>) => Promise<Auth> | Auth, scheme?: AuthScheme) {
+  // Shared registration used by both the public `auth()` and the built-in
+  // strategies. Every registered auth is ALWAYS documented as protected: a
+  // route with `{auth}` emits 401 + a `security` requirement. The optional
+  // `scheme` only controls the lock-icon KIND; when omitted we publish a
+  // default bearer scheme so the `security` requirement still resolves to a
+  // real `components.securitySchemes` entry (no dangling ref, lock icon shows).
+  // Internal: accepts the wide `SecurityScheme` (the built-in strategies need
+  // cookie/oauth2); the public `auth()` narrows its own `scheme` to `AuthScheme`.
+  function registerAuth(
+    name: string,
+    mw: (c: Context) => Promise<unknown> | unknown,
+    scheme?: SecurityScheme,
+  ) {
     // Wrap the return-based auth fn into a Hono middleware that stores the
     // auth context on c for the handler wrapper to read via c.get('auth').
     const wrapped: MiddlewareHandler = async (c, next) => {
-      const ctx = await mw(c as Context<E>);
+      const ctx = await mw(c as unknown as Context);
       (c as unknown as { set(key: string, value: unknown): void }).set("auth", ctx);
       await next();
     };
     auths.set(name, wrapped);
-    // Every registered auth is ALWAYS documented as protected: a route with
-    // `{auth}` emits 401 + a `security` requirement. The optional `scheme`
-    // only controls the lock-icon KIND; when omitted we publish a default
-    // bearer scheme so the `security` requirement still resolves to a real
-    // `components.securitySchemes` entry (no dangling ref, lock icon shows).
     const resolvedScheme = scheme ?? { type: "http", scheme: "bearer" };
     authSchemes.set(name, resolvedScheme);
     app.registerSecurityScheme(name, resolvedScheme);
   }
+
+  function auth(name: string, mw: (c: Context<E>) => Promise<Auth> | Auth, scheme?: AuthScheme) {
+    registerAuth(name, mw, scheme);
+  }
+
+  // --- Built-in auth strategies (session / jwt / oauth) ---
+
+  function registerSessionStrategy(name: string, opts: SessionStrategyOptions): SessionStrategy {
+    const handle = buildSessionStrategy(name, opts);
+    registerAuth(name, handle.middleware, handle.scheme);
+    return handle;
+  }
+
+  function registerJwtStrategy(name: string, opts: JwtStrategyOptions): JwtStrategy {
+    const handle = buildJwtStrategy(name, opts);
+    registerAuth(name, handle.middleware, handle.scheme);
+    return handle;
+  }
+
+  function registerOAuthStrategy(name: string, opts: OAuthStrategyOptions): OAuthStrategy {
+    const handle = buildOAuthStrategy(name, opts);
+    // OAuth is a *flow*, not a request guard: document the scheme and mount the
+    // /start + /callback routes. Protect downstream routes with a jwt/session gate.
+    app.registerSecurityScheme(name, handle.scheme);
+    handle.mount(app as unknown as FlowApp);
+    return handle;
+  }
+
+  function registerAuthStrategy<S extends AuthStrategySpec>(name: string, spec: S): StrategyFor<S> {
+    const handle = buildAuthStrategy(name, spec);
+    if ("middleware" in handle && handle.middleware) {
+      registerAuth(name, handle.middleware, handle.scheme);
+    } else {
+      app.registerSecurityScheme(name, handle.scheme);
+    }
+    if ("mount" in handle && handle.mount) handle.mount(app as unknown as FlowApp);
+    return handle;
+  }
+
+  const authWithStrategies = auth as typeof auth & {
+    strategy<Spec extends AuthStrategySpec>(name: string, spec: Spec): StrategyFor<Spec>;
+    session(name: string, opts: SessionStrategyOptions): SessionStrategy;
+    jwt(name: string, opts: JwtStrategyOptions): JwtStrategy;
+    oauth(name: string, opts: OAuthStrategyOptions): OAuthStrategy;
+  };
+  authWithStrategies.strategy = registerAuthStrategy;
+  authWithStrategies.session = registerSessionStrategy;
+  authWithStrategies.jwt = registerJwtStrategy;
+  authWithStrategies.oauth = registerOAuthStrategy;
 
   // Overload 1: no auth → req has no `auth` field
   function api<
@@ -398,5 +477,5 @@ export function createApi<Auth = undefined, E extends Env = Env>(
     app.get(resolvedUiPath, apiReference({ spec: { url: specPath } }));
   }
 
-  return { app, api: apiWithHelpers, auth, docs };
+  return { app, api: apiWithHelpers, auth: authWithStrategies, docs };
 }

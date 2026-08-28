@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.6.0] - 2026-08-28
+
+### Added
+
+- **Built-in auth strategies (ADR-012)** — opt-in `auth.session(name, opts)`, `auth.jwt(name, opts)`, `auth.oauth(name, opts)`, and the unified `auth.strategy(name, { type, ...opts })`. Each registers a guard through the same path as `auth(name, mw, scheme?)` (so `{ auth: name }` keeps the 401 + `security` + `securitySchemes` behavior) and returns flow helpers:
+  - **session** — signed `sid.hmac` cookie + pluggable `SessionStore` (in-memory via `createMemorySessionStore()`); helpers `create`/`destroy`/`get`/`generateCsrf`/`verifyCsrf`. `create`/`destroy` set the cookie on the context *and* return the `Set-Cookie` value for Response-returning handlers.
+  - **jwt** — HS256 access tokens (Web Crypto, no new dep) with a unique `jti`, plus opaque, hashed, rotating, single-use, family-revoked refresh tokens (in-memory via `createMemoryRefreshTokenStore()`); helpers `issue`/`refresh`/`revoke`/`verifyAccess`.
+  - **oauth (Google)** — authorization-code + PKCE flow; emits an `oauth2` security scheme and mounts `/auth/google/start` + `/auth/google/callback`; `onSuccess({ user, tokens, request, c })` is the integration point to issue a JWT or create a session; `fetchFn`/`tokenURL`/`userInfoURL` injectable for tests/proxies.
+- **Security-scheme type split** — a new `SecurityScheme` type is added for the *wide* emitted set `components.securitySchemes` (`apiKey`/`in:"cookie"` + `oauth2`/`authorizationCode`), re-exported from the barrel alongside the existing narrow `AuthScheme`. `AuthScheme` (the *input* to `auth(name, mw, scheme?)`) is UNCHANGED since v0.5.4 (`http` bearer/basic + `apiKey` header/query). **Compile-time-only break:** consumers who type `components.securitySchemes` entries (or a union over it) with `AuthScheme` must switch to `SecurityScheme`; passing a scheme to `auth()` and exhaustive switches over `AuthScheme` are unaffected.
+- **Strategies example** — `examples/strategies/` demonstrates session + jwt + google oauth in one app, wired into `check:all` and the README structure tree.
+- **Strategy self-check** — `src/auth.selfcheck.ts` (7 assertions) plus the strategies example, run via `nub run check:auth` / `nub run check:all`.
+
+### Security notes (ponytail ceilings)
+
+- JWT is **HS256 symmetric only** — no asymmetric (RS256/EdDSA) or JWKS support yet; the signing secret is a raw HMAC key.
+- Session cookies are **signed, not encrypted**, and are not `Secure` by default (set `secure: true` on https); CSRF is an opt-in double-submit token with `SameSite=Lax` as the default mitigation.
+- Default session/refresh stores are **in-memory (process-local)** — supply a durable `SessionStore`/`RefreshTokenStore` for production.
+
 ## [0.5.4] - 2026-08-27
 
 ### Changed

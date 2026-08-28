@@ -26,7 +26,7 @@
 | **B. Validation & Coercion** | `ArktypeValidator`, `Coercion` | `src/validation.ts` | `coerceDeep/coerceValue`, `arktypeValidator` (throws `APIError(400)`) | `errors` (kernel), `ArkType` |
 | **C. Routing & Paths** | `ParamToken`, `OapiPath`, `NormalizedMethod` | `src/paths.ts` | `PARAM_TOKEN_RE`, `parseParamTokens`, `toOapiPath`, `normalizeMethod`, `SUPPORTED_METHODS` | none (pure) |
 | **D. Spec & Registry** | `ComponentRegistry`, `Stable hash`, `RewriteRefs` | `src/registry.ts` | `sha1Hex`, `rewriteRefs`, `schemaToOA`, `getErrorSchemaRef`, `ComponentRegistry` | `errors` (for JsonSchema type) |
-| **E. Auth & Security** | `AuthScheme`, `SecurityRequirement` | split `api.ts` + `openapi.ts` (`registerSecurityScheme`) | `auth()` maps, `components.securitySchemes` | `paths` |
+| **E. Auth & Security** | `AuthScheme`, `SecurityScheme`, `SecurityRequirement` | `src/api.ts` + `src/openapi.ts` (`registerSecurityScheme`) + new `src/auth/` (built-in strategies: session / jwt / oauth) | `auth()` maps, strategy handles, `components.securitySchemes` | `paths`, `openapi` (SecurityScheme) |
 | **Kernel. Error & Lifecycle** | `APIError`, `ErrorHandler`, `fail` | `src/errors.ts` | `APIError`, `createErrorHandler(debug?)`, `fail/errors/httpErrors` | none |
 
 **Invariant:** dependency direction is `A → C, E, Kernel` and `C(orchestrator) → B, C, D, Kernel`. Never `B → C` or `D → A` (acyclic).
@@ -51,14 +51,14 @@ Source of truth for naming; ADRs reference these terms. See `docs/glossary.md` f
 |------|---------|------|------------|----------------------|
 | **RouteConfig** | OpenAPI | Entity input | Low-level `{method:Method, path:string(Hono), request?:{body?,query?,headers?,params?:ArkType}, responses?:Record<number,ArkType>, tags?, summary?, security?, middleware?, status?, operationId?, deprecated?}` consumed by `OpenAPIHono.openapi()` | `path` must start with `/`; `method` via `normalizeMethod` |
 | **ArkType** | Validation | VO | `Type<any,any>` — callable `schema(data)=>data\|ArkErrors` + `toJsonSchema(): JsonSchema`. Peer `arktype@^2.2.1` | Single source for validation + spec |
-| **AuthScheme** | Auth/OpenAPI | VO | ` {type:"http", scheme:"bearer"\|"basic"} \| {type:"apiKey", in:"header"\|"query", name:string}` — emitted to `components.securitySchemes` | Scalar lock icon; `auth(name,mw,scheme?)` |
+| **AuthScheme** | Auth/OpenAPI | VO | ` {type:"http", scheme:"bearer"\|"basic"} \| {type:"apiKey", in:"header"\|"query", name:string}` — narrow input to `auth(name,mw,scheme?)`; the wide emitted set is `SecurityScheme` | Scalar lock icon; `auth(name,mw,scheme?)` |
 | **Method normalization** | Routing | VO | `normalizeMethod(m:string): string` — case-insensitive, throws `Unsupported method: ${m}. Use one of: GET, ...` | `SUPPORTED_METHODS=["GET","POST","PUT","PATCH","DELETE"]`; `type Method = HttpMethod \| Lowercase<HttpMethod> \| (string & {})` |
 | **OapiPath** | OpenAPI | VO | OpenAPI form `/{param}` via `toOapiPath(path)` | `:name`→`{name}`, `:name{regex}`→`{name}`, `:name?`→`{name}`, `*`→`{wildcard}` |
 | **PARAM_TOKEN_RE** | Routing | VO | `/ :([a-zA-Z0-9_]+)(?:\{[^}]+\})?(\?)? /g` — shared constant for `parseParamTokens` | Captures `name` + `optional=!!?`. See ADR-010 |
 | **Coercion** | Validation | Policy | `coerceDeep(schema, data)` + `coerceValue(prop, raw, defs)` deep walk of `JsonSchema` before `schema(data)`; `string→number/boolean/array/object` | Guards: `raw===undefined` or `trim()===""` never coerce → preserved for 400. Array single `"1"`→`[1]` |
 | **ErrorHandler** | Kernel | Policy | `createErrorHandler(debug?) => (err,c)=>Response` — single chokepoint: `APIError→c.json({error},status)` else `console.error` + dev-gated `debug && (NODE_ENV==="development"||"test")` stack | `debug` is dev-only — **withholds** details (generic 500) unless NODE_ENV is explicitly development/test; warns if `debug && NODE_ENV==="production"` |
 | **OperationId** | OpenAPI | VO | Unique `operationId` per `OpenAPIOperation` | Default `method_oapiPath` (`/`→`_`, `{}` stripped); collision → `_2`,`_3` via `seenOperationIds:Set` + `baseCounts:Map`; overridable via `config.operationId` |
-| **ComponentRegistry** | OpenAPI | Aggregate | `{schemas:Map<string,JsonSchema>, securitySchemes:Map<string,AuthScheme>}` — hoists `$defs` to stable names | Key `schema_<sha1Hex(normalizeRefs(JSON.stringify(def))).slice(0,12)>` |
+| **ComponentRegistry** | OpenAPI | Aggregate | `{schemas:Map<string,JsonSchema>, securitySchemes:Map<string,SecurityScheme>}` — hoists `$defs` to stable names | Key `schema_<sha1Hex(normalizeRefs(JSON.stringify(def))).slice(0,12)>` |
 | **StoredRoute** | OpenAPI | Entity | Persisted `{method:string(lower), oapiPath:string, config:RouteConfig, handler:RouteHandler}` in `_routes[]` insertion order | Drives both Hono dispatch (`this.on`) and `_buildSpec` iteration |
 | **ArktypeValidator** | Validation | Middleware | `arktypeValidator(target:"json"\|"query"\|"header"\|"param", schema)` → `validator(target, fn)` that coerces then **throws `APIError(400, summary)`** on `ArkErrors` | Never returns `Response` — routes through `app.onError` (regression guard selfcheck #5) |
 | **DocsMount** | OpenAPI | VO | `docs(specPath?,uiPath?)` or `docs({specPath?,uiPath?})` — `app.doc(specPath, {openapi:"3.0.0",info})` + `app.get(uiPath, apiReference({spec:{url:specPath}}))` | Must be called after side-effect route imports |
@@ -71,6 +71,7 @@ Source of truth for naming; ADRs reference these terms. See `docs/glossary.md` f
 |-----|-------|--------|-------------------|
 | [010](./adr/010-extract-param-token-re.md) | Extract `PARAM_TOKEN_RE` and share param parsing | **Accepted — implemented** | Single `src/paths.ts` constant + `parseParamTokens(path)` + re-exports; delete duplicated `matchAll` in `api.ts`/`openapi.ts`. |
 | [011](./adr/011-split-openapi-by-responsibility.md) | Split `src/openapi.ts` by responsibility | **Proposed — deferred incremental** | Do **not** big-bang split at 700 LOC; extract `paths.ts` + `errors.ts` now, `validation.ts` next, defer `registry.ts` until >800 LOC / second divergent change. Justify: orchestration cohesion outweighs SRP cost today. |
+| [012](./adr/012-built-in-auth-strategies.md) | Built-in auth strategies (session / JWT / Google OAuth) | **Accepted — implemented** | New `src/auth/` module: additive `auth.session/jwt/oauth/strategy` builders that register through the same `auth(name,mw,scheme?)` path; `SecurityScheme` is the new wide emitted type (cookie apiKey + oauth2) while `AuthScheme` (the `auth()` input) is unchanged; JWT is homegrown HS256 via Web Crypto; session is signed-cookie + pluggable store; OAuth is an authorization-code + PKCE flow with `onSuccess` as the only integration point. All opt-in, no breaking change. |
 
 Full ADRs: `docs/adr/010-*.md`, `docs/adr/011-*.md`.
 
@@ -133,7 +134,7 @@ export function coerceValue(expected: JsonSchema, raw: unknown, defs?: Record<st
 export function arktypeValidator(target:"json"|"query"|"header"|"param", schema: ArkType): MiddlewareHandler;
 
 // src/registry.ts — pure + Web Crypto (PROPOSED — deferred until openapi.ts > 800 LOC / second divergent change, ADR-011)
-export type ComponentRegistry = { schemas: Map<string,JsonSchema>; securitySchemes: Map<string,AuthScheme> };
+export type ComponentRegistry = { schemas: Map<string,JsonSchema>; securitySchemes: Map<string,SecurityScheme> };
 export function rewriteRefs(node: unknown, rename: Map<string,string>): void;
 export function sha1Hex(data: string): Promise<string>;
 export function schemaToOA(schema: ArkType, registry: ComponentRegistry): Promise<JsonSchema>;
@@ -146,7 +147,7 @@ export class OpenAPIHono<E extends Env> extends Hono<E> {
   private _routes: StoredRoute[]; private _components: ComponentRegistry; private _errorSchemaRef: JsonSchema|null;
   openapi(config: RouteConfig, handler: RouteHandler): void;
   doc(url: string, info: {openapi?:string; info:{title:string;version:string}}): void;
-  registerSecurityScheme(name:string, scheme:AuthScheme): void;
+  registerSecurityScheme(name:string, scheme:SecurityScheme): void;
   private _buildSpec(...): Promise<OpenAPISpec>; private _buildResponses(...); private _addObjectParams(...);
 }
 

@@ -103,7 +103,13 @@ Run with `nub index.ts` (or `node index.ts` if you've built the lib).
   - `operationId?: string` — override auto-generated operationId (useful for SDK generation)
   - `deprecated?: boolean` — mark operation as deprecated in spec
   - `status?: number` — explicit success status (use 204 for No Content; handler returns `null`). When multiple 2xx/3xx codes are declared in `responses`, the default resolves to the **lowest** 2xx/3xx (JS enumerates integer-like keys in ascending order), so set `status` explicitly to get a non-lowest default
-- **`auth(name, middleware, scheme?)`** — registers a named auth middleware. **Return-based:** `(c: Context<Env>) => Auth` — throw to reject (e.g. `throw fail.unauthorized()`), or return a value that becomes `req.auth` in handlers. Apply via `{ auth: 'name' }` in the api config. The `scheme` argument registers an OpenAPI security scheme and controls the **lock-icon kind**: `{ type: 'http', scheme: 'bearer' }`, `{ type: 'http', scheme: 'basic' }`, or `{ type: 'apiKey', in: 'header', name: 'X-API-Key' }`. **A route with `{ auth }` is always documented as protected** — it emits a `401 Unauthorized` response, a `security` requirement, and the matching `components.securitySchemes` entry — even when `auth()` was registered *without* a `scheme`. When the `scheme` arg is omitted, a default `bearer` scheme is published so the `security` requirement resolves to a real scheme (no dangling reference) and the lock icon shows.
+- **`auth(name, middleware, scheme?)`** — registers a named auth middleware. **Return-based:** `(c: Context<Env>) => Auth` — throw to reject (e.g. `throw fail.unauthorized()`), or return a value that becomes `req.auth` in handlers. Apply via `{ auth: 'name' }` in the api config. The `scheme` argument registers an OpenAPI security scheme and controls the **lock-icon kind**: `{ type: 'http', scheme: 'bearer' }`, `{ type: 'http', scheme: 'basic' }`, or `{ type: 'apiKey', in: 'header', name: 'X-API-Key' }`. **A route with `{ auth }` is always documented as protected** — it emits a `401 Unauthorized` response, a `security` requirement, and the matching `components.securitySchemes` entry — even when `auth()` was registered *without* a `scheme`. When the `scheme` arg is omitted, a default `bearer` scheme is published so the `security` requirement resolves to a real scheme (no dangling reference) and the lock icon shows. **Scheme types — narrow input vs wide emitted:** the `scheme` argument to `auth()` is typed `AuthScheme` (the stable narrow input: `http` bearer/basic + `apiKey` header/query). The library *emits* a wider set into `components.securitySchemes` — `apiKey` with `in: "cookie"` and `oauth2`/`authorizationCode` — typed `SecurityScheme`. When reading `components.securitySchemes` (e.g. from a generated spec), type it as `SecurityScheme`, not `AuthScheme`. This split is a compile-time-only change; passing a scheme to `auth()` and exhaustive switches over `AuthScheme` are unaffected.
+- **Built-in auth strategies (opt-in, no breaking change)** — `auth` also carries three strategy builders that register guards through the same path (so `{ auth: name }` keeps the 401 + `security` + `securitySchemes` behavior) and return flow helpers:
+  - `const session = auth.session('session', { secret, cookieName?, store?, csrf? })` — signed cookie (`sid.hmac`) + pluggable `SessionStore`. Helpers: `session.create(c, data)` (sets the cookie *and* returns the `Set-Cookie` value), `session.destroy(c)`, `session.get(c)`, `session.generateCsrf(c)`, `session.verifyCsrf(c, token)`.
+  - `const jwt = auth.jwt('jwt', { secret, accessTtl?, refreshTtl?, issuer?, audience?, store? })` — HS256 access tokens (Web Crypto, no extra dep) + opaque rotating refresh tokens (single-use, family-revoked on reuse). Helpers: `jwt.issue(sub, claims?)`, `jwt.refresh(refreshToken)`, `jwt.revoke(refreshToken)`, `jwt.verifyAccess(token)`.
+  - `const google = auth.oauth('google', { clientId, clientSecret?, redirectUri, scopes?, onSuccess, ... })` — Google authorization-code + PKCE flow; registers the `oauth2` security scheme and mounts `/auth/google/start` + `/auth/google/callback`. `onSuccess({ user, tokens, request, c })` is where you issue a JWT (`jwt.issue(...)`) or create a session (`session.create(c, ...)`). `tokenURL`/`userInfoURL`/`fetchFn` are injectable for tests/proxies. The `/start`+`/callback` flow routes are registered on `app` but deliberately **not** emitted in the OpenAPI `paths` (the spec emitter is JSON-body-oriented — a `302` redirect would mismatch; the `oauth2` security scheme *is* emitted).
+  - `auth.strategy(name, { type: 'session' | 'jwt' | 'oauth', ... })` — unified dispatch over the same builders.
+  - Stores are injectable: `createMemorySessionStore()` / `createMemoryRefreshTokenStore()`, or any object implementing `SessionStore` / `RefreshTokenStore` (Postgres, Redis, KV) for production. **ponytail:** default stores are in-memory (process-local).
 - **`docs(specPath?, uiPath?)` / `docs({ specPath?, uiPath? })`** — mounts the OpenAPI JSON spec and Scalar docs UI. Both positional (`docs("/openapi.json", "/docs")`) and options-object (`docs({ specPath, uiPath })`) forms are supported.
 - **Header schemas must use lowercase keys** — Hono lowercases incoming headers via Fetch `Headers`; declare `type({ "x-api-key": "string" })` not `type({ "X-Api-Key": "string" })`. The spec emits lowercased header param names so runtime and docs match (`_addObjectParams` lowercases when `in === "header"`).
 - **Path params & `{regex}`** — `:name`, `:id?`, `:id{[0-9]+}` are parsed from the path and typed at the top level. **The `{regex}` in `:param{regex}` is enforced by Hono's router, not the ArkType param validator** — a mismatch produces a 404 (route doesn't match), and the ArkType schema types/validates the segment as `string`.
@@ -121,6 +127,7 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
 - Response schemas feed into OpenAPI output documentation
 - Auth middleware — named, reusable, applied per-endpoint, with OpenAPI security schemes
 - **Typed auth context** — `createApi<Auth, Env>()` + return-based `auth()` middleware propagate the authenticated user to handlers as `req.auth` with full type safety; `Env` types `req.c` (`c.var` / `c.env`)
+- **Built-in auth strategies** — session (cookie), JWT (bearer access + rotating refresh), and Google OAuth2 (authorization-code + PKCE), all opt-in and composable with the existing `{ auth: name }` gating. Emit the matching OpenAPI `securitySchemes` (`apiKey/in:cookie`, `bearer`, `oauth2/authorizationCode`). See the strategies example: `nub examples/strategies/index.ts`.
 - **`fail` error helpers** — `throw fail.notFound('...')` for ergonomic typed HTTP errors (11 named status helpers + `APIError` for custom codes). `fail` is the canonical helper; `errors` / `httpErrors` are deprecated synonyms.
 - **Accurate default docs** — auth-protected routes always document `401` + a `security` requirement (even when `auth()` is registered without a `scheme`, which defaults to `bearer`); the auto-documented 400 on `:param` routes can be suppressed per-route with `hide400`; `info.version` defaults to `0.0.0` not a misleading `1.0.0`
 - **Unified 404** — unmatched routes return `application/json {error}` through the single error policy, matching `fail.notFound()`
@@ -139,8 +146,9 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
 ```
 src/
   openapi.ts    — OpenAPIHono class, arktypeValidator, APIError, OpenAPI spec emission
-  api.ts        — createApi, api, auth, docs (DSL facade)
+  api.ts        — createApi, api, auth (+ strategies), docs (DSL facade)
   paths.ts      — single source for path & method grammar (PARAM_TOKEN_RE, normalizeMethod, toOapiPath)
+  auth/         — built-in auth strategies (crypto, store, cookie, session, jwt, oauth)
   index.ts      — public barrel (re-exports all public API)
 examples/
   basic/        — single-file example app
@@ -160,6 +168,10 @@ examples/
     routes.ts     — route definitions
     index.ts      — server entry
     types.d.ts    — typed c.var.session augmentation
+    selfcheck.ts  — runnable end-to-end test suite
+  strategies/   — built-in auth strategies example (session + jwt + google oauth)
+    routes.ts     — route definitions
+    index.ts      — server entry
     selfcheck.ts  — runnable end-to-end test suite
 dist/           — built output (created by `nub run build`)
 ```

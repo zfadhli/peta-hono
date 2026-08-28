@@ -13,6 +13,7 @@
 | 009 | Method shorthands, Method typing, operationId/deprecated, Env generic (v0.5.0) | 2026-08-26 | Accepted |
 | 010 | Extract `PARAM_TOKEN_RE` and share param parsing | 2026-08-26 | Accepted — implemented |
 | 011 | Split `src/openapi.ts` by responsibility (deferred incremental) | 2026-08-26 | Proposed |
+| 012 | Built-in auth strategies (session / JWT / Google OAuth) | 2026-08-27 | Accepted — implemented |
 
 Glossary: [`../glossary.md`](../glossary.md)
 Domain model: [`../domain-model.md`](../domain-model.md) (canonical) · [`../../.scratch/grill-with-docs/domain-model.md`](../../.scratch/grill-with-docs/domain-model.md) (grill archive)

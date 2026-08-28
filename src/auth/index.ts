@@ -1,0 +1,70 @@
+/**
+ * Built-in auth strategies for `peta-hono`.
+ *
+ * Three strategy builders are provided — session, JWT (+ refresh rotation), and
+ * Google OAuth2 — each returning a handle that can be registered as an auth gate
+ * (`{ auth: name }`) and/or drives a login/refresh/OAuth flow. They compose with
+ * the existing `auth(name, mw, scheme?)` mechanism: a strategy's guard middleware
+ * is registered through the same code path, so a `{ auth: name }` route still
+ * emits a 401 + a `security` requirement + the matching `components.securitySchemes`
+ * entry.
+ */
+
+import { buildJwtStrategy, type JwtStrategy, type JwtStrategyOptions } from "./jwt.js";
+import { buildOAuthStrategy, type OAuthStrategy, type OAuthStrategyOptions } from "./oauth.js";
+import {
+  buildSessionStrategy,
+  type SessionStrategy,
+  type SessionStrategyOptions,
+} from "./session.js";
+
+export type { CookieSerializeOptions } from "./cookie.js";
+export type { IssuedTokens, JwtStrategy, JwtStrategyOptions } from "./jwt.js";
+export { buildJwtStrategy } from "./jwt.js";
+export type { FlowApp, OAuthStrategy, OAuthStrategyOptions, OAuthSuccessEvent } from "./oauth.js";
+export { buildOAuthStrategy } from "./oauth.js";
+export type { SessionStrategy, SessionStrategyOptions } from "./session.js";
+export { buildSessionStrategy } from "./session.js";
+export type { RefreshTokenRecord, RefreshTokenStore, SessionStore } from "./store.js";
+// Shared primitives (store adapters / crypto / cookie) are public so users can
+// back the strategies with a durable store and reuse the low-level helpers.
+export { createMemoryRefreshTokenStore, createMemorySessionStore } from "./store.js";
+
+// --- Unified `auth.strategy(name, spec)` dispatch ---
+
+/** Discriminated strategy spec for `auth.strategy(name, spec)`. */
+export type AuthStrategySpec =
+  | ({ type: "session" } & SessionStrategyOptions)
+  | ({ type: "jwt" } & JwtStrategyOptions)
+  | ({ type: "oauth" } & OAuthStrategyOptions);
+
+/** Map a `type` discriminator to its strategy handle. */
+export type StrategyFor<S extends AuthStrategySpec> = S extends { type: "session" }
+  ? SessionStrategy
+  : S extends { type: "jwt" }
+    ? JwtStrategy
+    : S extends { type: "oauth" }
+      ? OAuthStrategy
+      : never;
+
+/**
+ * Dispatch a discriminated strategy spec to the matching builder.
+ * Convenience for `auth.strategy(name, spec)`; the named builders
+ * (`auth.session/jwt/oauth`) call their own factory directly.
+ */
+export function buildAuthStrategy<S extends AuthStrategySpec>(
+  name: string,
+  spec: S,
+): StrategyFor<S> {
+  switch (spec.type) {
+    case "session":
+      return buildSessionStrategy(name, spec) as StrategyFor<S>;
+    case "jwt":
+      return buildJwtStrategy(name, spec) as StrategyFor<S>;
+    case "oauth":
+      return buildOAuthStrategy(name, spec) as StrategyFor<S>;
+    default:
+      // Exhaustive: spec.type is a closed 3-member union.
+      throw new Error(`Unknown auth strategy: ${(spec as { type: string }).type}`);
+  }
+}

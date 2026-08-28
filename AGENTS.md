@@ -28,7 +28,10 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 | Blog tests | `nub examples/blog/selfcheck.ts` |
 | Auth tests | `nub examples/auth/selfcheck.ts` |
 | Lib tests | `nub src/openapi.selfcheck.ts` |
-| All tests | `nub run check:all` (`lib + basic + blog + auth`) |
+| Strategy tests | `nub src/auth.selfcheck.ts` |
+| Strategies example | `nub examples/strategies/index.ts` |
+| Strategies tests | `nub examples/strategies/selfcheck.ts` |
+| All tests | `nub run check:all` (`lib + auth-strategies + basic + blog + auth + strategies`) |
 
 ## Structure
 
@@ -36,12 +39,15 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 - `src/openapi.ts` — OpenAPIHono class (default `onError` + `notFound`), arktypeValidator, APIError, AuthScheme, createErrorHandler, OpenAPI spec emission (re-exports paths helpers)
 - `src/api.ts` — library: createApi, api, auth, docs, fail (re-exports APIError from openapi.ts)
 - `src/index.ts` — public barrel (re-exports all public API)
+- `src/auth/` — built-in auth strategies (session / jwt / oauth): crypto, store, cookie, session, jwt, oauth
 - `src/openapi.selfcheck.ts` — runnable lib integration test (12 assertions)
+- `src/auth.selfcheck.ts` — runnable built-in auth strategy test (session / jwt / oauth / scheme emission / coexistence)
 - `src/typecheck.selfcheck.ts` — type-only regression guard (tsc --noEmit; excluded from dist/ build)
 - `examples/basic/` — single-file example app (routes.ts + index.ts + selfcheck.ts; hello, things, search, legacy)
 - `examples/blog/` — multi-file blog API (setup.ts singleton, db.ts + schema.ts, posts.ts + comments.ts, index.ts + selfcheck.ts)
 - `examples/blog/spec.snapshot.json` — golden OpenAPI spec for regression detection
 - `examples/auth/` — peta-auth integration example (routes.ts + index.ts + types.d.ts + selfcheck.ts)
+- `examples/strategies/` — built-in auth strategies example (session + jwt + google oauth; routes.ts + index.ts + selfcheck.ts)
 
 ## Conventions
 
@@ -63,6 +69,7 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 - `APIError(status, message)` for typed HTTP errors (status is `ContentfulStatusCode`)
 - `fail` is the canonical error helper — `throw fail.notFound("...")`. `errors` / `httpErrors` are deprecated pure synonyms (still exported). The 11 named helpers (`fail.badRequest`, `fail.unauthorized`, `fail.forbidden`, `fail.notFound`, `fail.conflict`, `fail.unprocessableEntity`, `fail.tooManyRequests`, `fail.internalServerError`, `fail.badGateway`, `fail.serviceUnavailable`, `fail.gatewayTimeout`) live in `src/api.ts`.
 - `auth(name, mw, scheme?)` registers middleware + an OpenAPI security scheme. The `scheme` arg defaults to `bearer` if omitted; every `{auth}` route is **always documented as protected** — it emits a `401` response, a `security` requirement, and the matching `components.securitySchemes` entry.
+- Built-in auth strategies (opt-in, ADR-012): `auth.session(name, opts)`, `auth.jwt(name, opts)`, `auth.oauth(name, opts)` (and `auth.strategy(name, { type, ...opts })`) register guards through the same path as `auth(name, mw, scheme?)`, so `{ auth: name }` keeps the 401 + `security` + `securitySchemes` behavior. Session = signed `sid.hmac` cookie + pluggable `SessionStore`; JWT = HS256 access tokens (Web Crypto, no dep) + opaque rotating/revocable refresh tokens; OAuth = Google authorization-code + PKCE flow. **OAuth registers only the `oauth2` scheme + mounts `/start`/`/callback`; it is NOT a request guard** — protect downstream routes with a jwt/session gate. The `/start`+`/callback` flow routes are intentionally NOT emitted in the OpenAPI `paths` (the spec emitter is JSON-body-oriented; a `302` redirect would mismatch), but the `oauth2` securitySchemes entry is. Stores default in-memory — supply a durable `SessionStore`/`RefreshTokenStore` in prod (ponytail). **Input vs emitted security-scheme type:** `AuthScheme` is the narrow `auth(name, mw, scheme?)` input (http bearer/basic, apiKey header/query — unchanged since v0.5.4); `SecurityScheme` is the wide emitted `components.securitySchemes` type (adds `apiKey` `in: "cookie"` and `oauth2` with `authorizationCode` flows).
 - All errors — handler-thrown `APIError`, validator failures, unexpected throws — route through `app.onError` (single chokepoint). `OpenAPIHono` registers a default `onError`; `createApi()` overrides it with its own policy. The `OpenAPIHono` ctor also registers `this.notFound(...)` so an unmatched route returns `application/json {error:"Not Found"}` via the shared `createErrorHandler` policy — unifying the 404 shape with `fail.notFound()`.
 - `arktypeValidator` throws `APIError(400, summary)` on validation failure (does not return a `Response`) so `onError` sees validation errors
 - `createErrorHandler(debug?)` is **dev-only** — it reveals `{ error, stack }` only when `NODE_ENV` is explicitly `development` or `test`; otherwise (production, or `NODE_ENV` absent on Bun/Deno/edge) it redacts to `{"error":"Internal Server Error"}`. `createApi({ debug: true })` wires this; never rely on `NODE_ENV === "production"` (the old gate leaked when unset).

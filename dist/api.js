@@ -1,6 +1,7 @@
 import { apiReference } from "@scalar/hono-api-reference";
 import { type } from "arktype";
-import { APIError, createErrorHandler, OpenAPIHono } from "./openapi.js";
+import { buildAuthStrategy, buildJwtStrategy, buildOAuthStrategy, buildSessionStrategy, } from "./auth/index.js";
+import { APIError, createErrorHandler, OpenAPIHono, } from "./openapi.js";
 import { normalizeMethod, parseParamTokens } from "./paths.js";
 // Re-export APIError (defined in openapi.ts) so the public barrel keeps a
 // stable shape via api.ts. See issue #4: APIError moved to openapi.ts so the
@@ -64,7 +65,15 @@ export function createApi(opts = {}) {
     app.onError(createErrorHandler(opts.debug));
     const auths = new Map();
     const authSchemes = new Map();
-    function auth(name, mw, scheme) {
+    // Shared registration used by both the public `auth()` and the built-in
+    // strategies. Every registered auth is ALWAYS documented as protected: a
+    // route with `{auth}` emits 401 + a `security` requirement. The optional
+    // `scheme` only controls the lock-icon KIND; when omitted we publish a
+    // default bearer scheme so the `security` requirement still resolves to a
+    // real `components.securitySchemes` entry (no dangling ref, lock icon shows).
+    // Internal: accepts the wide `SecurityScheme` (the built-in strategies need
+    // cookie/oauth2); the public `auth()` narrows its own `scheme` to `AuthScheme`.
+    function registerAuth(name, mw, scheme) {
         // Wrap the return-based auth fn into a Hono middleware that stores the
         // auth context on c for the handler wrapper to read via c.get('auth').
         const wrapped = async (c, next) => {
@@ -73,15 +82,49 @@ export function createApi(opts = {}) {
             await next();
         };
         auths.set(name, wrapped);
-        // Every registered auth is ALWAYS documented as protected: a route with
-        // `{auth}` emits 401 + a `security` requirement. The optional `scheme`
-        // only controls the lock-icon KIND; when omitted we publish a default
-        // bearer scheme so the `security` requirement still resolves to a real
-        // `components.securitySchemes` entry (no dangling ref, lock icon shows).
         const resolvedScheme = scheme ?? { type: "http", scheme: "bearer" };
         authSchemes.set(name, resolvedScheme);
         app.registerSecurityScheme(name, resolvedScheme);
     }
+    function auth(name, mw, scheme) {
+        registerAuth(name, mw, scheme);
+    }
+    // --- Built-in auth strategies (session / jwt / oauth) ---
+    function registerSessionStrategy(name, opts) {
+        const handle = buildSessionStrategy(name, opts);
+        registerAuth(name, handle.middleware, handle.scheme);
+        return handle;
+    }
+    function registerJwtStrategy(name, opts) {
+        const handle = buildJwtStrategy(name, opts);
+        registerAuth(name, handle.middleware, handle.scheme);
+        return handle;
+    }
+    function registerOAuthStrategy(name, opts) {
+        const handle = buildOAuthStrategy(name, opts);
+        // OAuth is a *flow*, not a request guard: document the scheme and mount the
+        // /start + /callback routes. Protect downstream routes with a jwt/session gate.
+        app.registerSecurityScheme(name, handle.scheme);
+        handle.mount(app);
+        return handle;
+    }
+    function registerAuthStrategy(name, spec) {
+        const handle = buildAuthStrategy(name, spec);
+        if ("middleware" in handle && handle.middleware) {
+            registerAuth(name, handle.middleware, handle.scheme);
+        }
+        else {
+            app.registerSecurityScheme(name, handle.scheme);
+        }
+        if ("mount" in handle && handle.mount)
+            handle.mount(app);
+        return handle;
+    }
+    const authWithStrategies = auth;
+    authWithStrategies.strategy = registerAuthStrategy;
+    authWithStrategies.session = registerSessionStrategy;
+    authWithStrategies.jwt = registerJwtStrategy;
+    authWithStrategies.oauth = registerOAuthStrategy;
     function api(config, handler) {
         // Method normalization is case-insensitive and uses the single
         // normalizeMethod helper (same message as OpenAPIHono) for consistency.
@@ -175,6 +218,6 @@ export function createApi(opts = {}) {
         });
         app.get(resolvedUiPath, apiReference({ spec: { url: specPath } }));
     }
-    return { app, api: apiWithHelpers, auth, docs };
+    return { app, api: apiWithHelpers, auth: authWithStrategies, docs };
 }
 //# sourceMappingURL=api.js.map

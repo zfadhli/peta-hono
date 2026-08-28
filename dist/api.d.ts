@@ -1,9 +1,10 @@
 import { type Type } from "arktype";
 import type { Context, Env, MiddlewareHandler } from "hono";
-import { APIError, type AuthScheme, OpenAPIHono } from "./openapi.js";
+import { type AuthStrategySpec, type JwtStrategy, type JwtStrategyOptions, type OAuthStrategy, type OAuthStrategyOptions, type SessionStrategy, type SessionStrategyOptions, type StrategyFor } from "./auth/index.js";
+import { APIError, type AuthScheme, OpenAPIHono, type SecurityScheme } from "./openapi.js";
 import { type Method } from "./paths.js";
 export type { HttpMethod, Method } from "./paths.js";
-export type { AuthScheme };
+export type { AuthScheme, SecurityScheme };
 export { APIError };
 export declare const fail: {
     badRequest: (msg?: string) => APIError;
@@ -179,7 +180,12 @@ export declare function createApi<Auth = undefined, E extends Env = Env>(opts?: 
         del: ApiMethodHelper<Auth, E>;
         delete: ApiMethodHelper<Auth, E>;
     };
-    auth: (name: string, mw: (c: Context<E>) => Promise<Auth> | Auth, scheme?: AuthScheme) => void;
+    auth: ((name: string, mw: (c: Context<E>) => Promise<Auth> | Auth, scheme?: AuthScheme) => void) & {
+        strategy<Spec extends AuthStrategySpec>(name: string, spec: Spec): StrategyFor<Spec>;
+        session(name: string, opts: SessionStrategyOptions): SessionStrategy;
+        jwt(name: string, opts: JwtStrategyOptions): JwtStrategy;
+        oauth(name: string, opts: OAuthStrategyOptions): OAuthStrategy;
+    };
     docs: {
         (specPath?: string, uiPath?: string): void;
         (options: {

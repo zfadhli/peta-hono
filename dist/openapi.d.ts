@@ -6,6 +6,23 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Method } from "./paths.js";
 /** Any ArkType type instance — has toJsonSchema() and is callable for validation. */
 export type ArkType = Type<any, any>;
+/** OAuth2 authorization-code flow (Google, GitHub, ...). */
+export type OAuth2Flows = {
+    authorizationCode: {
+        authorizationUrl: string;
+        tokenUrl: string;
+        /** scope → human description. */
+        scopes: Record<string, string>;
+    };
+};
+/**
+ * The OpenAPI security scheme a caller passes to `auth(name, mw, scheme?)`.
+ * This is the stable, narrow input set (http bearer/basic, apiKey header/query)
+ * matching v0.5.4. It is intentionally narrower than what the library can
+ * *emit* — see `SecurityScheme`. Keeping this narrow means callers who construct
+ * a scheme to pass to `auth()` (and any exhaustive switch over this type) are
+ * unaffected by the built-in-strategy additions.
+ */
 export type AuthScheme = {
     type: "http";
     scheme: "bearer" | "basic";
@@ -13,6 +30,22 @@ export type AuthScheme = {
     type: "apiKey";
     in: "header" | "query";
     name: string;
+};
+/**
+ * The full set of OpenAPI security schemes the library can emit, including the
+ * cookie-based `apiKey` (`in: "cookie"`) and the `oauth2` variant that the
+ * built-in strategies contribute. This is the type of `components.securitySchemes`
+ * entries — use it when *reading* the emitted spec; use `AuthScheme` when
+ * *passing* a scheme to `auth()`. Widening this does not affect the `auth()`
+ * input contract.
+ */
+export type SecurityScheme = AuthScheme | {
+    type: "apiKey";
+    in: "cookie";
+    name: string;
+} | {
+    type: "oauth2";
+    flows: OAuth2Flows;
 };
 export interface RouteConfig {
     method: Method;
@@ -73,7 +106,7 @@ export declare class OpenAPIHono<E extends Env = Env, S extends Schema = Schema,
         };
     }): void;
     /** Register an OpenAPI security scheme (e.g. bearer, apiKey). */
-    registerSecurityScheme(name: string, scheme: AuthScheme): void;
+    registerSecurityScheme(name: string, scheme: SecurityScheme): void;
     private _buildSpec;
     private _buildResponses;
     private _errorSchemaRef;
