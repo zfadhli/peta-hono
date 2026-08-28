@@ -1,7 +1,9 @@
 // ponytail: no test framework — runnable self-check with asserts.
 // Boots the strategies example on a random port and exercises the session,
 // jwt, and Google OAuth strategies end-to-end (OAuth endpoints are mocked in
-// routes.ts via an injected fetchFn).
+// routes.ts via an injected fetchFn). Also covers the session `csrf: "origin"`
+// enforcement, the opt-in `peta-hono/password` helper, and the JWT
+// `refreshTransport` HttpOnly cookie.
 
 import { createAdaptorServer } from "@hono/node-server";
 import { app } from "./routes.js";
@@ -47,7 +49,8 @@ try {
   const r0 = await fetch(`${baseUrl}/health`);
   assert(r0.status === 200, "health status");
 
-  // 2. Session login → set sid cookie
+  // 2. Session login → sets the sid cookie. csrf:"origin" lets a non-browser
+  // client through (fetch sends no Origin).
   const r1 = await req("/auth/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -57,6 +60,14 @@ try {
   assert(r1.status === 200, "login status");
   assert(cookie.startsWith("sid="), "login set sid cookie");
   assert(j1.email === "alice@example.com", "login email");
+
+  // 2b. Wrong password → 401 (verified against the peta-hono/password hash).
+  const r1b = await req("/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "alice@example.com", password: "not-the-password" }),
+  });
+  assert(r1b.status === 401, "login wrong password 401");
 
   // 3. Session me (cookie) → context flows
   const r2 = await req("/auth/me");
@@ -68,13 +79,24 @@ try {
   const r4 = await fetch(`${baseUrl}/auth/me`);
   assert(r4.status === 401, "me without cookie 401");
 
-  // 5. Logout clears the sid cookie
-  const r5 = await req("/auth/logout", { method: "POST" });
-  assert(r5.status === 204, "logout status");
+  // 5. csrf:"origin" — a cross-site mutating request is rejected 403...
+  const r5a = await req("/auth/logout", {
+    method: "POST",
+    headers: { origin: "http://evil.example" },
+  });
+  assert(r5a.status === 403, "logout cross-origin 403");
+  assert(cookie.startsWith("sid="), "cross-origin logout keeps the session");
+
+  // ...while a same-origin one passes (and clears the session cookie).
+  const r5b = await req("/auth/logout", {
+    method: "POST",
+    headers: { origin: "http://localhost:3000" },
+  });
+  assert(r5b.status === 204, "logout same-origin 204");
   assert(cookie === "", "logout cleared cookie");
 
-  // 6. JWT token issue + verify + refresh
-  const r6 = await req("/auth/token", {
+  // 6. JWT token issue → body tokens + HttpOnly refresh cookie (refreshTransport)
+  const r6 = await fetch(`${baseUrl}/auth/token`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: "alice@example.com" }),
@@ -82,7 +104,14 @@ try {
   const j6: any = await r6.json();
   assert(r6.status === 200, "token issue status");
   assert(typeof j6.accessToken === "string", "access token type");
+  const rt = r6.headers.get("set-cookie") ?? "";
+  assert(rt.startsWith("rt="), "token issue sets refresh cookie");
+  assert(
+    rt.includes("; HttpOnly") && rt.includes("; Path=/auth"),
+    "refresh cookie HttpOnly + path",
+  );
 
+  // 7. Verify the bearer access token (signed by keys[0], kid-stamped)
   const r7 = await fetch(`${baseUrl}/auth/verify`, {
     headers: { authorization: `Bearer ${j6.accessToken}` },
   });
@@ -90,7 +119,8 @@ try {
   assert(r7.status === 200, "verify status");
   assert(j7.sub === "u_alice", "verify sub");
 
-  const r8 = await req("/auth/refresh", {
+  // 8. Refresh rotates the token (and sets a fresh refresh cookie)
+  const r8 = await fetch(`${baseUrl}/auth/refresh`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ refreshToken: j6.refreshToken }),
@@ -99,15 +129,15 @@ try {
   assert(r8.status === 200, "refresh status");
   assert(j8.refreshToken !== j6.refreshToken, "refresh rotates token");
 
-  // 7. Reuse of the rotated refresh token → 401 (family revoked)
-  const r9 = await req("/auth/refresh", {
+  // 9. Reuse of the rotated refresh token → 401 (family revoked)
+  const r9 = await fetch(`${baseUrl}/auth/refresh`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ refreshToken: j6.refreshToken }),
   });
   assert(r9.status === 401, "refresh reuse 401");
 
-  // 8. Google OAuth start → 302 + state cookie
+  // 10. Google OAuth start → 302 + state cookie
   const r10 = await fetch(`${baseUrl}/auth/google/start`, { redirect: "manual" });
   const loc = r10.headers.get("location") ?? "";
   assert(r10.status === 302, "oauth start 302");
@@ -121,7 +151,7 @@ try {
     "oauth start state cookie",
   );
 
-  // 9. OAuth callback (mock endpoints) → onSuccess runs, session cookie set
+  // 11. OAuth callback (mock endpoints) → onSuccess runs, session cookie set
   const r11 = await fetch(
     `${baseUrl}/auth/google/callback?code=mock_code&state=${encodeURIComponent(state)}`,
     { headers: { cookie: r10.headers.get("set-cookie")?.split(";")[0] ?? "" } },
@@ -131,14 +161,14 @@ try {
   assert(j11.email === "alice@example.com", "oauth callback email");
   assert((r11.headers.get("set-cookie") ?? "").includes("sid="), "oauth callback sets session");
 
-  // 10. OAuth-issued session works on a protected route
+  // 12. OAuth-issued session works on a protected route
   const jar = (r11.headers.get("set-cookie") ?? "").split(";")[0]!.startsWith("sid=")
     ? (r11.headers.get("set-cookie") ?? "").split(";")[0]!
     : "";
   const r12 = await fetch(`${baseUrl}/auth/me`, { headers: { cookie: jar } });
   assert(r12.status === 200, "oauth session me status");
 
-  // 11. OpenAPI spec documents all three security schemes
+  // 13. OpenAPI spec documents all three security schemes
   const r13 = await fetch(`${baseUrl}/openapi.json`);
   const spec: any = await r13.json();
   const schemes = spec.components?.securitySchemes ?? {};

@@ -1,11 +1,17 @@
 import { type } from "arktype";
 import { createApi, fail } from "../../src/index.js";
+import { hashPassword, verifyPassword } from "../../src/password.js";
 
 /**
- * Demonstrates the three built-in auth strategies in one app:
- *   - session (cookie)      → `/auth/me`, `/auth/logout`
- *   - jwt (bearer + refresh)→ `/auth/token`, `/auth/refresh`, `/auth/verify`
- *   - google oauth2 (flow)  → `/auth/google/start`, `/auth/google/callback`
+ * Demonstrates the three built-in auth strategies in one app, on the hardened
+ * (ticket 03–05) surface:
+ *   - session (cookie, csrf `"origin"`) → `/auth/me`, `/auth/logout`
+ *   - jwt (bearer + rotating refresh + HttpOnly refresh cookie) → `/auth/token`,
+ *     `/auth/refresh`, `/auth/verify`
+ *   - google oauth2 (authorization-code + PKCE) → `/auth/google/start`, `/auth/google/callback`
+ *
+ * It also shows the opt-in `peta-hono/password` helper (`hashPassword` /
+ * `verifyPassword`) for hashing the demo user's credential.
  *
  * The strategies compose with the existing `{ auth: name }` route gating: each
  * guard is registered exactly like a hand-written `auth(name, mw, scheme)` and
@@ -20,6 +26,10 @@ const users = new Map<string, { id: string; email: string }>([
   ["alice@example.com", { id: "u_alice", email: "alice@example.com" }],
 ]);
 
+// Opt-in password helper: hash the demo password once at module load; login
+// constant-time-verifies against it (rather than a hardcoded string compare).
+const demoPasswordHash = await hashPassword("password");
+
 const { api, auth, docs, app } = createApi<{ userId?: string; email?: string; sub?: string }>({
   title: "Strategies API",
   version: "1.0.0",
@@ -29,7 +39,11 @@ const { api, auth, docs, app } = createApi<{ userId?: string; email?: string; su
 const session = auth.session("session", {
   secret: "replace-this-32-byte-session-secret!!",
   cookieName: "sid",
-  csrf: false,
+  // CSRF defaults to `"origin"`: a cross-site mutating request (mismatched
+  // `Origin` or `Sec-Fetch-Site: cross-site`) is rejected 403 with no client
+  // token. `origin` (a string | string[]) is REQUIRED in this mode — the demo
+  // app serves from http://localhost:3000, so this is the allowed origin.
+  origin: ["http://localhost:3000"],
   // Dev-over-http: the session cookie is `Secure` by default (production). This
   // example runs on http, so opt out explicitly — remove in prod (or on https).
   cookie: { secure: false },
@@ -37,11 +51,29 @@ const session = auth.session("session", {
 
 // --- JWT strategy (bearer access + rotating refresh) ---
 const jwt = auth.jwt("jwt", {
-  secret: "replace-this-32-byte-jwt-secret!!",
+  // Key rotation: `keys[0]` signs and stamps its `kid`; verification looks the
+  // key up by the token's `kid` (an unknown/missing `kid` is rejected). Rotate
+  // by prepending a new key and dropping the retired one.
+  keys: [
+    { kid: "2026-08", secret: "replace-this-32-byte-jwt-secret!!" },
+    { kid: "2025-11", secret: "older-rotated-out-secret-32-bytes!!" },
+  ],
+  // `algorithms` pins the accepted `alg` (must include the signing alg). Signing
+  // with `keys[0]` (an HMAC secret) is HS256, so HS256 must be accepted.
+  algorithms: ["HS256"],
+  // Asymmetric / multi-service verification is opt-in via `jwks` — a `URL`
+  // resolves a remote JWKS, `{ keys: JWK[] }` a local one. Signing still uses
+  // `keys`/`secret`. See `src/auth.selfcheck.ts` (`jwtAsymmetric`) for a full
+  // RS256 + local-JWKS round-trip example.
+  // jwks: someUrl | { keys: [{ kty, kid, k / n / e, alg }] },
   issuer: "strategies-example",
   audience: "api",
   accessTtl: 900,
   refreshTtl: 2592000,
+  // `refreshTransport` also sets/clears an HttpOnly refresh cookie (path-scoped
+  // to `/auth`) on `issue`/`refresh`/`revoke`. Tokens are still returned in the
+  // body, so a client can use either transport.
+  refreshTransport: { cookie: { name: "rt", path: "/auth" } },
 });
 
 // --- Google OAuth2 (authorization-code flow) ---
@@ -119,8 +151,10 @@ api.post(
   },
   async ({ body, c }) => {
     const user = users.get(body.email);
-    // ponytail: demo password is "password" — verify a real hash in production.
-    if (!user || body.password !== "password") throw fail.unauthorized("Invalid credentials");
+    // Verify against the precomputed `peta-hono/password` hash (constant-time).
+    if (!user || !(await verifyPassword(demoPasswordHash, body.password))) {
+      throw fail.unauthorized("Invalid credentials");
+    }
     await session.create(c, { userId: user.id, email: user.email });
     return { email: user.email };
   },
@@ -146,10 +180,11 @@ api.post(
 api.post(
   "/auth/token",
   { tags: ["Auth"], summary: "Issue access + refresh token", body: type({ email: "string" }) },
-  async ({ body }) => {
+  // Pass `c` so `refreshTransport` also sets the HttpOnly refresh cookie.
+  async ({ body, c }) => {
     const user = users.get(body.email);
     if (!user) throw fail.unauthorized("Unknown user");
-    return jwt.issue(user.id);
+    return jwt.issue(user.id, {}, c);
   },
 );
 
@@ -163,7 +198,8 @@ api.post(
       200: type({ accessToken: "string", refreshToken: "string", expiresIn: "number" }),
     },
   },
-  async ({ body }) => jwt.refresh(body.refreshToken),
+  // Pass `c` so the rotated refresh token also lands in the refresh cookie.
+  async ({ body, c }) => jwt.refresh(body.refreshToken, c),
 );
 
 api.get(

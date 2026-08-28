@@ -46,6 +46,11 @@ homegrown `signAccessToken`/`verifyAccessToken` in `src/auth/jwt.ts` with `jose`
 - **`refreshTransport?: { cookie: {...} }`** — when set, `issue`/`refresh` also
   set an HttpOnly refresh cookie on the supplied `Context` and `revoke` clears
   it, via the `CookieTransport` helper from `src/auth/cookie.ts` (ticket 03).
+  `CookieTransport` defaults to HttpOnly + Secure + SameSite=Lax, path-scoped,
+  with **`hostPrefix: false`** (a deliberate default so `path` scoping works).
+  Setting `hostPrefix: true` renames to `__Host-<name>` **and forces `Path=/`**,
+  so a non-`/` `path` requires omitting `hostPrefix` (the `Secure` + `__Secure-`
+  variant works at a non-`/` path).
 
 ## Alternatives considered
 
