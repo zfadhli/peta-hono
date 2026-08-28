@@ -14,6 +14,8 @@
 | 010 | Extract `PARAM_TOKEN_RE` and share param parsing | 2026-08-26 | Accepted — implemented |
 | 011 | Split `src/openapi.ts` by responsibility (deferred incremental) | 2026-08-26 | Proposed |
 | 012 | Built-in auth strategies (session / JWT / Google OAuth) | 2026-08-27 | Accepted — implemented |
+| 013 | Adopt `jose` for the JWT layer | 2026-08-29 | Accepted — implemented |
+| 014 | Adopt `@noble/hashes` for crypto + opt-in password hashing | 2026-08-29 | Accepted — implemented |
 
 Glossary: [`../glossary.md`](../glossary.md)
 Domain model: [`../domain-model.md`](../domain-model.md) (canonical) · [`../../.scratch/grill-with-docs/domain-model.md`](../../.scratch/grill-with-docs/domain-model.md) (grill archive)

@@ -19,6 +19,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./password": {
+      "types": "./dist/password.d.ts",
+      "import": "./dist/password.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -36,7 +40,7 @@
     "check": "nub examples/basic/selfcheck.ts",
     "blog": "nub examples/blog/index.ts",
     "blog:check": "nub examples/blog/selfcheck.ts",
-    "check:all": "nub src/openapi.selfcheck.ts && nub src/auth.selfcheck.ts && nub examples/basic/selfcheck.ts && nub examples/blog/selfcheck.ts && nub examples/auth/selfcheck.ts && nub examples/strategies/selfcheck.ts",
+    "check:all": "nub src/openapi.selfcheck.ts && nub src/auth.selfcheck.ts && nub src/password.selfcheck.ts && nub examples/basic/selfcheck.ts && nub examples/blog/selfcheck.ts && nub examples/auth/selfcheck.ts && nub examples/strategies/selfcheck.ts",
     "check:auth": "nub src/auth.selfcheck.ts",
     "strategies": "nub examples/strategies/index.ts",
     "strategies:check": "nub examples/strategies/selfcheck.ts",

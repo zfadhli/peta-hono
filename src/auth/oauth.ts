@@ -1,6 +1,12 @@
 import type { Context } from "hono";
 import { APIError, type SecurityScheme } from "../openapi.js";
-import { expiredCookie, parseCookies, serializeCookie } from "./cookie.js";
+import {
+  type CookieSerializeOptions,
+  cookieNameFor,
+  expiredCookie,
+  parseCookies,
+  serializeCookie,
+} from "./cookie.js";
 import {
   base64urlUtf8,
   hmacSign,
@@ -25,14 +31,29 @@ import {
  * `components.securitySchemes`; it is a *flow*, not a request guard — protect
  * downstream routes with a `jwt` or `session` strategy's `{ auth: name }`.
  *
- * PKCE is enabled by default when `clientSecret` is omitted (SPA / public
- * clients). The `code_verifier` is never leaked: it travels only in the
- * signed, HttpOnly, short-lived state cookie.
+ * PKCE is enabled by default (even for confidential clients with a
+ * `clientSecret`). The `code_verifier` is never leaked: it travels only in the
+ * signed, HttpOnly, short-lived state cookie (now `Secure` by default). A
+ * provider `error` query param (user denies consent) is routed to `onError`.
  *
  * ponytail: `onSuccess` is the only integration point (no automatic JWT/session
  * issuance wired in). Token endpoint / userinfo are plain `fetch` calls —
  * override `tokenURL`/`userInfoURL`/`fetchFn` for tests or a proxy.
  */
+
+/** Cookie attribute block for the OAuth state cookie (defaults to `Secure`). */
+export interface OAuthStateCookieOptions {
+  /** `Secure` flag. Default `true`. */
+  secure?: boolean;
+  /** Rename to `__Host-<name>` and force `Secure` + `Path=/` + no `Domain`. */
+  hostPrefix?: boolean;
+  /** Cookie path (default `"/"`). */
+  path?: string;
+  /** `HttpOnly` flag (default true). */
+  httpOnly?: boolean;
+  /** `SameSite` attribute (default `"Lax"`). */
+  sameSite?: "Lax" | "Strict" | "None";
+}
 
 export interface OAuthStrategyOptions {
   provider?: "google";
@@ -49,8 +70,10 @@ export interface OAuthStrategyOptions {
   stateSecret?: string;
   stateCookieName?: string;
   stateTtlSeconds?: number;
-  /** PKCE (default `true` when no `clientSecret`, else `false`). */
+  /** PKCE (default `true`). */
   usePKCE?: boolean;
+  /** State-cookie attribute block (defaults to `secure: true`, host prefix off). */
+  stateCookie?: OAuthStateCookieOptions;
   /** Base path for the flow routes (default `"/auth/google"`). */
   path?: string;
   /** Override `fetch` (tests / proxy). Defaults to `globalThis.fetch`. */
@@ -116,17 +139,24 @@ export function buildOAuthStrategy(name: string, opts: OAuthStrategyOptions): OA
   const stateSecret = opts.stateSecret ?? clientSecret ?? randomToken(32);
   const stateCookieName = opts.stateCookieName ?? "oauth_state";
   const stateTtlSeconds = opts.stateTtlSeconds ?? 600;
-  const usePKCE = opts.usePKCE ?? !clientSecret;
+  // PKCE on by default — confidential (clientSecret) clients get it too.
+  const usePKCE = opts.usePKCE ?? true;
   const path = opts.path ?? `/auth/${provider}`;
   const fetchFn = opts.fetchFn ?? globalThis.fetch;
   const onSuccess = opts.onSuccess;
   const onError = opts.onError;
 
-  const stateCookieOpts = {
+  // Hardened state cookie: Secure by default; `__Host-` prefix is opt-in.
+  const stateCookieOptsRaw = opts.stateCookie ?? {};
+  const stateHostPrefix = stateCookieOptsRaw.hostPrefix ?? false;
+  const resolvedStateCookieName = cookieNameFor(stateCookieName, stateHostPrefix);
+  const stateCookieOpts: CookieSerializeOptions = {
     maxAge: stateTtlSeconds,
-    path: "/",
-    httpOnly: true,
-    sameSite: "Lax" as const,
+    path: stateCookieOptsRaw.path ?? "/",
+    httpOnly: stateCookieOptsRaw.httpOnly ?? true,
+    secure: stateCookieOptsRaw.secure ?? true,
+    sameSite: stateCookieOptsRaw.sameSite ?? "Lax",
+    hostPrefix: stateHostPrefix,
   };
 
   async function signStatePayload(payload: StatePayload): Promise<string> {
@@ -136,7 +166,7 @@ export function buildOAuthStrategy(name: string, opts: OAuthStrategyOptions): OA
   }
 
   async function readStatePayload(c: Context): Promise<StatePayload | null> {
-    const raw = parseCookies(c.req.header("Cookie"))[stateCookieName];
+    const raw = parseCookies(c.req.header("Cookie"))[resolvedStateCookieName];
     if (!raw) return null;
     const dot = raw.lastIndexOf(".");
     if (dot === -1) return null;
@@ -254,6 +284,13 @@ export function buildOAuthStrategy(name: string, opts: OAuthStrategyOptions): OA
         try {
           const code = c.req.query("code");
           const state = c.req.query("state");
+          // A provider denial (`?error=access_denied`) is a deliberate user
+          // action — surface it via onError rather than "Invalid OAuth state".
+          const error = c.req.query("error");
+          if (error) {
+            const desc = c.req.query("error_description");
+            throw new APIError(400, `OAuth provider error: ${error}${desc ? `: ${desc}` : ""}`);
+          }
           const saved = await readStatePayload(c);
           if (!code || !state || !saved || saved.state !== state) {
             throw new APIError(400, "Invalid OAuth state");
@@ -285,9 +322,6 @@ export function buildOAuthStrategy(name: string, opts: OAuthStrategyOptions): OA
   };
 
   function attachClearStateCookie(res: Response): void {
-    res.headers.append(
-      "Set-Cookie",
-      expiredCookie(stateCookieName, { path: "/", httpOnly: true, sameSite: "Lax" }),
-    );
+    res.headers.append("Set-Cookie", expiredCookie(stateCookieName, stateCookieOpts));
   }
 }

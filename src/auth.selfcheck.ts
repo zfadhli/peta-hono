@@ -18,8 +18,10 @@
  */
 
 import { type } from "arktype";
+import type { Context } from "hono";
 import { SignJWT } from "jose";
 import { createApi } from "./api.js";
+import { createCookieTransport, parseCookies, serializeCookie } from "./auth/cookie.js";
 
 let passed = 0;
 let failed = 0;
@@ -336,7 +338,10 @@ async function openApiSchemes(): Promise<void> {
     version: "1.0.0",
   });
 
-  const sessionStore = auth.session("session", { secret: "session-secret-32-chars-long!!" });
+  const sessionStore = auth.session("session", {
+    secret: "session-secret-32-chars-long!!",
+    csrf: false,
+  });
   const jwtStore = auth.jwt("jwt", { secret: "jwt-secret-32-chars-long!!" });
   const googleStore = auth.oauth("google", {
     clientId: "cid",
@@ -395,7 +400,10 @@ async function openApiSchemes(): Promise<void> {
 
 async function coexistence(): Promise<void> {
   const { api, auth, docs, app } = createApi<Record<string, unknown>>({ title: "mix" });
-  const session = auth.session("session", { secret: "session-secret-32-chars-long!!" });
+  const session = auth.session("session", {
+    secret: "session-secret-32-chars-long!!",
+    csrf: false,
+  });
   const jwt = auth.jwt("jwt", { secret: "jwt-secret-32-chars-long!!" });
 
   api.get("/public", {}, async () => ({ kind: "public" }));
@@ -495,7 +503,11 @@ async function csrfFlow(): Promise<void> {
 
 async function strategyDispatch(): Promise<void> {
   const { api, auth, docs, app } = createApi<Record<string, unknown>>({ title: "dispatch" });
-  const session = auth.strategy("s2", { type: "session", secret: "dispatch-secret-32-chars!!" });
+  const session = auth.strategy("s2", {
+    type: "session",
+    secret: "dispatch-secret-32-chars!!",
+    csrf: false,
+  });
 
   api.post("/login", { body: type({ userId: "string" }) }, async ({ body, c }) => {
     await session.create(c, { userId: body.userId });
@@ -522,6 +534,393 @@ async function strategyDispatch(): Promise<void> {
   assert(spec.components?.securitySchemes?.s2?.in === "cookie", "dispatch scheme cookie");
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. Cookie serialization hardening + CookieTransport
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A minimal Hono `Context` stand-in exposing the header surface the cookie helpers use. */
+function makeFakeContext() {
+  const setCookies: string[] = [];
+  let cookieHeader = "";
+  const c = {
+    req: {
+      header(name: string) {
+        return name === "Cookie" ? cookieHeader || null : null;
+      },
+    },
+    header(_name: string, value: string) {
+      setCookies.push(value);
+    },
+  } as unknown as Context;
+  return {
+    c,
+    setCookies,
+    applyLast() {
+      const last = setCookies[setCookies.length - 1];
+      if (last !== undefined) cookieHeader = last.split(";")[0]!;
+    },
+  };
+}
+
+async function cookieSerialization(): Promise<void> {
+  // __Host- prefix forces Secure + Path=/ and renames the cookie.
+  {
+    const cookie = serializeCookie("sid", "abc", { hostPrefix: true });
+    assert(cookie.startsWith("__Host-sid=abc"), "hostPrefix renames to __Host-sid");
+    assert(cookie.includes("; Secure"), "hostPrefix forces Secure");
+    assert(cookie.includes("; Path=/"), "hostPrefix forces Path=/");
+  }
+  // __Host- rejects a non-"/" path and a Domain.
+  {
+    let threw = false;
+    try {
+      serializeCookie("sid", "abc", { hostPrefix: true, path: "/auth" });
+    } catch {
+      threw = true;
+    }
+    assert(threw, "hostPrefix rejects a non-/ path");
+  }
+  {
+    let threw = false;
+    try {
+      serializeCookie("sid", "abc", { hostPrefix: true, domain: "example.com" });
+    } catch {
+      threw = true;
+    }
+    assert(threw, "hostPrefix rejects Domain");
+  }
+  // SameSite=None requires Secure (RFC-6265bis).
+  {
+    let threw = false;
+    try {
+      serializeCookie("sid", "abc", { sameSite: "None" });
+    } catch {
+      threw = true;
+    }
+    assert(threw, "SameSite=None without Secure throws");
+  }
+  // __Secure- prefix does NOT force Path=/.
+  {
+    const cookie = serializeCookie("sid", "abc", {
+      securePrefix: true,
+      secure: true,
+      path: "/auth",
+    });
+    assert(cookie.startsWith("__Secure-sid=abc"), "securePrefix renames to __Secure-sid");
+    assert(cookie.includes("; Path=/auth"), "securePrefix keeps Path=/auth");
+  }
+}
+
+async function cookieTransportRoundTrip(): Promise<void> {
+  // Defaults: HttpOnly + Secure + SameSite=Lax, path scoped; set → read → clear.
+  {
+    const fc = makeFakeContext();
+    const transport = createCookieTransport({ name: "rt", path: "/auth" });
+    transport.set(fc.c, "token-1");
+    assert(fc.setCookies[0]!.includes("; HttpOnly"), "transport cookie HttpOnly");
+    assert(fc.setCookies[0]!.includes("; Secure"), "transport cookie Secure");
+    assert(fc.setCookies[0]!.includes("; SameSite=Lax"), "transport cookie SameSite=Lax");
+    fc.applyLast();
+    assert(transport.read(fc.c) === "token-1", "transport read returns the set token");
+    transport.clear(fc.c);
+    const cleared = fc.setCookies[fc.setCookies.length - 1]!;
+    assert(cleared.includes("; Max-Age=0"), "transport clear uses Max-Age=0");
+    assert(cleared.startsWith("rt="), "transport clear keeps the name");
+  }
+  // Host-prefixed transport renames and reads via the __Host- name.
+  {
+    const fc = makeFakeContext();
+    const transport = createCookieTransport({ name: "rt", hostPrefix: true });
+    transport.set(fc.c, "val");
+    assert(fc.setCookies[0]!.startsWith("__Host-rt=val"), "hostPrefix transport renames");
+    fc.applyLast();
+    assert(transport.read(fc.c) === "val", "hostPrefix transport reads the renamed cookie");
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. Session CSRF origin mode + Secure cookie default
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sessionOriginCsrf(): Promise<void> {
+  const { api, auth, docs, app } = createApi<Record<string, unknown>>({ title: "origin-csrf" });
+  const session = auth.session("session", {
+    secret: "origin-secret-32-chars-long!!",
+    origin: "http://localhost", // CSRF defaults to "origin"
+  });
+
+  api.post("/login", { body: type({ userId: "string" }) }, async ({ body, c }) => {
+    await session.create(c, { userId: body.userId });
+    return { ok: true };
+  });
+  api.post("/update", { auth: "session" }, async ({ auth }) => ({ userId: auth.userId }));
+  docs();
+
+  const login = await app.request("/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ userId: "alice" }),
+  });
+  assert(login.status === 200, "origin-csrf login 200");
+  const cookie = cookieValue(login);
+  assert(
+    (login.headers.get("set-cookie") ?? "").includes("; Secure"),
+    "session cookie Secure by default",
+  );
+
+  // Same-origin mutating request passes with NO client token.
+  const ok = await app.request("/update", {
+    method: "POST",
+    headers: { cookie, origin: "http://localhost" },
+  });
+  assert(ok.status === 200, "origin-csrf same-origin passes with no token");
+
+  // Mismatched Origin → 403.
+  const cross = await app.request("/update", {
+    method: "POST",
+    headers: { cookie, origin: "http://evil.example" },
+  });
+  assert(cross.status === 403, "origin-csrf mismatched Origin 403");
+
+  // Sec-Fetch-Site: cross-site → 403.
+  const xsite = await app.request("/update", {
+    method: "POST",
+    headers: { cookie, "sec-fetch-site": "cross-site" },
+  });
+  assert(xsite.status === 403, "origin-csrf cross-site 403");
+
+  // A non-browser client (no Origin) still passes.
+  const noOrigin = await app.request("/update", { method: "POST", headers: { cookie } });
+  assert(noOrigin.status === 200, "origin-csrf non-browser passes");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9b. Session cookie host-prefix
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sessionHostPrefix(): Promise<void> {
+  const { api, auth, docs, app } = createApi<Record<string, unknown>>({ title: "host-prefix" });
+  const session = auth.session("session", {
+    secret: "host-prefix-secret-32-chars-long!!",
+    csrf: false,
+    cookie: { hostPrefix: true },
+  });
+  api.post("/login", { body: type({ userId: "string" }) }, async ({ body, c }) => {
+    await session.create(c, { userId: body.userId });
+    return { ok: true };
+  });
+  api.get("/me", { auth: "session" }, async ({ auth }) => ({ userId: auth.userId }));
+  api.post("/logout", { auth: "session", status: 204 }, async ({ c }) => {
+    await session.destroy(c);
+    return null;
+  });
+  docs();
+
+  const login = await app.request("/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ userId: "alice" }),
+  });
+  const sc = login.headers.get("set-cookie") ?? "";
+  assert(sc.startsWith("__Host-sid="), "session hostPrefix cookie __Host-sid");
+  assert(sc.includes("; Path=/") && sc.includes("; Secure"), "session hostPrefix Path=/ + Secure");
+  const cookie = sc.split(";")[0]!;
+  const me = await app.request("/me", { headers: { cookie } });
+  assert(me.status === 200, "session hostPrefix read works");
+  assert((await me.json()).userId === "alice", "session hostPrefix context flows");
+  // The cleared cookie also uses __Host-sid + Max-Age=0 (no double prefix).
+  const out = await app.request("/logout", { method: "POST", headers: { cookie } });
+  const cleared = out.headers.get("set-cookie") ?? "";
+  assert(cleared.startsWith("__Host-sid="), "session hostPrefix logout clears __Host-sid");
+  assert(cleared.includes("; Max-Age=0"), "session hostPrefix logout Max-Age=0");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 10. OAuth PKCE-on-by-default (confidential client) + provider error
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function oauthPkceAndError(): Promise<void> {
+  const { api, auth, docs, app } = createApi<Record<string, unknown>>({ title: "oauth-pkce" });
+  const fetchFn: typeof fetch = async () => new Response("not found", { status: 404 });
+
+  // Confidential client (clientSecret) with NO explicit usePKCE → PKCE on by default.
+  auth.oauth("google", {
+    clientId: "cid",
+    clientSecret: "csecret",
+    redirectUri: "http://localhost/cb",
+    authorizationURL: "https://mock.example/auth",
+    tokenURL: "https://mock.example/token",
+    userInfoURL: "https://mock.example/userinfo",
+    fetchFn,
+    onSuccess: ({ user }) =>
+      new Response(JSON.stringify({ email: user.email }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    onError: (err) =>
+      new Response(JSON.stringify({ error: err.message }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      }),
+  });
+
+  api.get("/public", {}, async () => ({ ok: true }));
+  docs();
+
+  const start = await app.request("/auth/google/start");
+  assert(start.status === 302, "oauth pkce start 302");
+  const loc = start.headers.get("location") ?? "";
+  assert(
+    loc.includes("code_challenge=") && loc.includes("code_challenge_method=S256"),
+    "confidential client uses PKCE by default",
+  );
+  const startCookie = start.headers.get("set-cookie") ?? "";
+  assert(
+    startCookie.includes("oauth_state=") && startCookie.includes("; Secure"),
+    "oauth state cookie is Secure",
+  );
+
+  // Provider denial ?error=access_denied → onError (not "Invalid OAuth state").
+  const err = await app.request("/auth/google/callback?error=access_denied");
+  assert(err.status === 400, "oauth provider error -> onError 400");
+  const errBody: any = await err.json();
+  assert(errBody.error.includes("access_denied"), "oauth provider error message");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 11. JWT key rotation (`keys`/`kid`) + alg-pinning
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function jwtRotation(): Promise<void> {
+  const { api, auth, docs, app } = createApi<Record<string, unknown>>({ title: "jwt-rotation" });
+  const jwt = auth.jwt("jwt", {
+    keys: [
+      { kid: "k1", secret: "rotation-secret-k1-32-bytes!!" },
+      { kid: "k2", secret: "rotation-secret-k2-32-bytes!!" },
+    ],
+    algorithms: ["HS256"],
+  });
+  api.post("/login", {}, async () => jwt.issue("user-1"));
+  docs();
+
+  const login = await app.request("/login", { method: "POST" });
+  const t: any = await login.json();
+  const header = JSON.parse(Buffer.from(t.accessToken.split(".")[0]!, "base64url").toString());
+  assert(header.kid === "k1", "rotation stamps current key kid");
+  assert((await jwt.verifyAccess(t.accessToken))?.sub === "user-1", "rotation verifies via kid");
+
+  // Rotate k1 away — a token still signed with k1 now fails (unknown kid).
+  const { auth: auth2 } = createApi<Record<string, unknown>>({ title: "jwt-rotation2" });
+  const jwt2 = auth2.jwt("jwt2", {
+    keys: [{ kid: "k2", secret: "rotation-secret-k2-32-bytes!!" }],
+    algorithms: ["HS256"],
+  });
+  assert((await jwt2.verifyAccess(t.accessToken)) === null, "rotated-away kid rejected");
+
+  // A token with a missing kid is rejected in keys mode.
+  const noKid = await new SignJWT({ sub: "user-1" })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setExpirationTime("1m")
+    .sign(new TextEncoder().encode("rotation-secret-k1-32-bytes!!"));
+  assert((await jwt.verifyAccess(noKid)) === null, "missing kid rejected in keys mode");
+
+  // An alg outside `algorithms` is rejected (alg-confusion closed).
+  const wrongAlg = await new SignJWT({ sub: "user-1" })
+    .setProtectedHeader({ alg: "HS512", typ: "JWT", kid: "k1" })
+    .setExpirationTime("1m")
+    .sign(new TextEncoder().encode("rotation-secret-k1-32-bytes!!"));
+  assert((await jwt.verifyAccess(wrongAlg)) === null, "alg outside algorithms rejected");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 12. JWT asymmetric (RS256) + JWKS verification
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function jwtAsymmetric(): Promise<void> {
+  const keyPair = await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"],
+  );
+  const publicJwk = (await crypto.subtle.exportKey("jwk", keyPair.publicKey)) as {
+    kty: string;
+    n: string;
+    e: string;
+  };
+
+  const { api, auth, docs, app } = createApi<Record<string, unknown>>({ title: "jwt-rs" });
+  const jwt = auth.jwt("jwt", {
+    keys: [{ kid: "rsa1", key: keyPair.privateKey }],
+    jwks: { keys: [{ ...publicJwk, kid: "rsa1", alg: "RS256" }] },
+    algorithms: ["RS256"],
+  });
+  api.post("/login", {}, async () => jwt.issue("user-1"));
+  api.get("/me", { auth: "jwt" }, async ({ auth }) => ({ sub: auth.sub }));
+  docs();
+
+  const login = await app.request("/login", { method: "POST" });
+  const t: any = await login.json();
+  const header = JSON.parse(Buffer.from(t.accessToken.split(".")[0]!, "base64url").toString());
+  assert(header.alg === "RS256", "RS256 token alg");
+  assert(header.kid === "rsa1", "RS256 token kid");
+
+  assert((await jwt.verifyAccess(t.accessToken))?.sub === "user-1", "RS256 verify via JWKS");
+
+  const me = await app.request("/me", {
+    headers: { authorization: `Bearer ${t.accessToken}` },
+  });
+  assert(me.status === 200, "RS256 guarded route 200");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 13. JWT refresh-token cookie transport (`refreshTransport`)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function jwtRefreshTransport(): Promise<void> {
+  const { api, auth, docs, app } = createApi<Record<string, unknown>>({ title: "jwt-rt" });
+  const jwt = auth.jwt("jwt", {
+    secret: "jwt-refresh-32-chars-long!!",
+    refreshTransport: { cookie: { name: "rt", path: "/auth" } },
+  });
+  api.post("/login", {}, async ({ c }) => jwt.issue("user-1", {}, c));
+  api.post("/refresh", {}, async ({ c }) =>
+    jwt.refresh(parseCookies(c.req.header("Cookie")).rt!, c),
+  );
+  docs();
+
+  const login = await app.request("/login", { method: "POST" });
+  const sc = login.headers.get("set-cookie") ?? "";
+  assert(sc.startsWith("rt="), "issue sets refresh cookie");
+  assert(
+    sc.includes("; HttpOnly") && sc.includes("; Path=/auth"),
+    "refresh cookie HttpOnly + path",
+  );
+  const t1: any = await login.json();
+  const rtCookie = sc.split(";")[0]!;
+  assert(rtCookie.slice("rt=".length) === t1.refreshToken, "refresh cookie value matches body");
+
+  const ref = await app.request("/refresh", { method: "POST", headers: { cookie: rtCookie } });
+  assert(ref.status === 200, "refresh via cookie 200");
+  const refSc = ref.headers.get("set-cookie") ?? "";
+  assert(refSc.startsWith("rt="), "refresh sets a new refresh cookie");
+  const t2: any = await ref.json();
+  assert(
+    refSc.slice("rt=".length).split(";")[0] === t2.refreshToken,
+    "rotated cookie matches body",
+  );
+
+  // Without `refreshTransport`, tokens are returned in the body only.
+  const { auth: auth2 } = createApi<Record<string, unknown>>({ title: "jwt-no-rt" });
+  const jwt2 = auth2.jwt("jwt", { secret: "jwt-refresh-32-chars-long!!" });
+  const t3 = await jwt2.issue("user-1");
+  assert(typeof t3.refreshToken === "string", "no-refreshTransport still returns body-only token");
+}
+
 console.log("=== Built-in auth strategy self-check ===");
 console.log();
 
@@ -533,6 +932,14 @@ await check("OpenAPI securitySchemes emitted", openApiSchemes);
 await check("Strategies coexist in one app", coexistence);
 await check("CSRF (opt-in) enforced on mutating requests", csrfFlow);
 await check("auth.strategy unified dispatch", strategyDispatch);
+await check("Cookie serialize hardening (__Host- / __Secure- / None=Secure)", cookieSerialization);
+await check("CookieTransport set / read / clear round-trip", cookieTransportRoundTrip);
+await check("Session CSRF origin mode + Secure cookie default", sessionOriginCsrf);
+await check("Session cookie host-prefix (__Host-sid round-trip)", sessionHostPrefix);
+await check("OAuth PKCE-by-default (confidential) + provider error", oauthPkceAndError);
+await check("JWT key rotation (kid) + alg-pinning", jwtRotation);
+await check("JWT asymmetric RS256 + JWKS verification", jwtAsymmetric);
+await check("JWT refresh-token cookie transport", jwtRefreshTransport);
 
 console.log();
 console.log(`Result: ${passed}/${total} passed, ${failed} failed`);

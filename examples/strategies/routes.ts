@@ -30,6 +30,9 @@ const session = auth.session("session", {
   secret: "replace-this-32-byte-session-secret!!",
   cookieName: "sid",
   csrf: false,
+  // Dev-over-http: the session cookie is `Secure` by default (production). This
+  // example runs on http, so opt out explicitly — remove in prod (or on https).
+  cookie: { secure: false },
 });
 
 // --- JWT strategy (bearer access + rotating refresh) ---
@@ -49,7 +52,10 @@ auth.oauth("google", {
   clientSecret: "example-client-secret",
   redirectUri: "http://localhost:3000/auth/google/callback",
   scopes: ["openid", "email", "profile"],
-  usePKCE: true,
+  // PKCE is on by default (even with a clientSecret) — no `usePKCE` needed.
+  // Dev-over-http: the state cookie is `Secure` by default (production). This
+  // example runs on http, so opt out explicitly — remove in prod (or on https).
+  stateCookie: { secure: false },
   tokenURL: "https://mock.example/token",
   userInfoURL: "https://mock.example/userinfo",
   // Demo mock — real apps omit `fetchFn` and point at Google (server-side secret).

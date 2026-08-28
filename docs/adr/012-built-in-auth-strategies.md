@@ -110,6 +110,8 @@ proxies; `onSuccess` is where you issue a JWT or create a session.
   but pulls a dependency tree and type surface into a library that is deliberately
   thin and runtime-portable. Web Crypto HS256 covers the requirement at zero
   dependency cost. Rejected: keep the tree light; documented ceiling (RS256/JWKS).
+  **Superseded by [ADR-013](./013-adopt-jose-for-jwt.md)** — the library now adopts
+  `jose` for the JWT layer (HS256 default + opt-in RS256/EdDSA/JWKS/rotation).
 - **Wire OAuth to automatically issue a JWT/session** — couples the strategies and
   hides the integration point. Rejected: `onSuccess` keeps the strategies
   composable and lets the caller decide (issue JWT *or* session *or* both).

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`jose` for the JWT layer (ADR-013)** — `src/auth/jwt.ts` now signs/verifies via `jose` `SignJWT`/`jwtVerify` instead of hand-rolled JWS (landed as part of the auth-lean hardening). Opt-in capability: `keys`/`kid` rotation, `jwks` (a `URL` or `{ keys: JWK[] }`) for local/remote JWKS, asymmetric signing (RS256/EdDSA via a `CryptoKey`), `algorithms` alg-pinning (default `["HS256"]`; must include the signing alg), and `refreshTransport` (an HttpOnly refresh cookie set/cleared via `CookieTransport` on `issue`/`refresh`/`revoke`). Existing single-`secret` callers are unchanged (HS256, no `kid`, body-only tokens).
+- **`@noble/hashes` for the shared crypto (ADR-014)** — `src/auth/crypto.ts` delegates HMAC-SHA256, SHA-256, and CSPRNG bytes to `@noble/hashes` with the same exported helper names/signatures (session/oauth unchanged; landed as part of the auth-lean hardening, and it set the Node floor to `>=20.19`).
+- **Opt-in `peta-hono/password` subpath** — `hashPassword`/`verifyPassword` via `@noble/hashes` `scrypt` (audited, zero-dependency). Returns a self-describing, parameter-encoded hash (work factors + salt + derived key) with constant-time verification; per-call work-factor overrides; documented argon2id caveat.
+- **Cookie serialization hardening** — `serializeCookie` gains `domain`/`priority`/`hostPrefix`/`securePrefix`; `__Host-<name>` forces `Secure` + `Path=/` + no `Domain` (throws on `domain`/non-`/` path); `__Secure-<name>` requires `Secure` but does not force `Path=/`; `SameSite="None"` requires `Secure` (RFC-6265bis). A `createCookieTransport(opts)` helper (`read`/`set`/`clear`) round-trips an opaque bearer token in an HttpOnly cookie.
+
+### Changed
+
+- **Session CSRF default is now `"origin"`** — `csrf: "origin" | "double-submit" | false` (default `"origin"`), with a new `origin?: string | string[]` option (required when `csrf` is `"origin"` and unset — throws a helpful error). `"origin"` rejects cross-site mutating requests (mismatched `Origin` / `Sec-Fetch-Site: cross-site` → 403) with no client token; `true` is an alias for `"double-submit"` (the classic `x-csrf-token` behavior); `false` restores legacy. **Migration:** callers who ran `csrf: false` are unaffected; callers relying on cookie-auth mutations without a token should set `csrf: false` or configure `origin`.
+- **Session cookie is `Secure` by default** — a `cookie` block (`{ secure?, sameSite?, path?, httpOnly?, hostPrefix? }`) defaults `secure: true` (dev-over-http opt-out: `cookie: { secure: false }`) and supports `__Host-` via `hostPrefix`.
+- **OAuth PKCE is on by default** — `usePKCE` defaults to `true` even for confidential clients with a `clientSecret`; the state cookie is `Secure` by default, and a provider `error` query param (user denial) is routed to `onError` instead of "Invalid OAuth state".
+- **Node floor bumped to `>=20.19.0`** — `@noble/hashes` v2 is ESM-only. `engines.node` reflects this.
+
+### Security notes (ponytail ceilings)
+
+- JWT is HS256-symmetric by default; asymmetric (RS256/EdDSA)/JWKS/key-rotation are opt-in via `keys`/`jwks`/`algorithms`. Tokens are signed not encrypted.
+- Default session/refresh stores are in-memory (process-local) — supply a durable `SessionStore`/`RefreshTokenStore` for production.
+- `hashPassword`/`verifyPassword` are credential hashing only — no user/password/session management (the caller's job).
+- `arctic`/`oslo` are deprecated (by their author); the hand-rolled Google OAuth flow is deliberate.
+
 ## [0.6.0] - 2026-08-28
 
 ### Added

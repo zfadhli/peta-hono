@@ -6,21 +6,30 @@ export { APIError, createApi, errors, fail, httpErrors } from "./api.js";
 export type {
   AuthStrategySpec,
   CookieSerializeOptions,
+  CookieTransport,
+  CookieTransportOptions,
   FlowApp,
   IssuedTokens,
+  JwtKey,
   JwtStrategy,
   JwtStrategyOptions,
+  OAuthStateCookieOptions,
   OAuthStrategy,
   OAuthStrategyOptions,
   OAuthSuccessEvent,
   RefreshTokenRecord,
   RefreshTokenStore,
+  RefreshTransportOptions,
+  SessionCookieOptions,
+  SessionCsrf,
   SessionStore,
   SessionStrategy,
   SessionStrategyOptions,
 } from "./auth/index.js";
 // --- Built-in auth strategies (store adapters + strategy types) ---
 export {
+  cookieNameFor,
+  createCookieTransport,
   createMemoryRefreshTokenStore,
   createMemorySessionStore,
 } from "./auth/index.js";
