@@ -18,12 +18,15 @@
  */
 
 import { type } from "arktype";
+import { SignJWT } from "jose";
 import { createApi } from "./api.js";
 
 let passed = 0;
 let failed = 0;
+let total = 0;
 
 async function check(name: string, fn: () => Promise<void>) {
+  total++;
   try {
     await fn();
     passed++;
@@ -166,6 +169,17 @@ async function jwtFlow(): Promise<void> {
     assert(res.status === 401, "me bad token 401");
   }
 
+  // An HS512-signed token is rejected because the strategy pins algorithms:["HS256"]
+  // (alg-confusion closed).
+  {
+    const hs512Token = await new SignJWT({ sub: "user-1" })
+      .setProtectedHeader({ alg: "HS512" })
+      .setExpirationTime("1m")
+      .sign(new TextEncoder().encode("jwt-secret-32-chars-long!!"));
+    const payload = await jwt.verifyAccess(hs512Token);
+    assert(payload === null, "HS512 token rejected (alg pinned to HS256)");
+  }
+
   // Refresh → rotation (new access + new refresh, old becomes single-use)
   const r2 = await app.request("/refresh", {
     method: "POST",
@@ -203,6 +217,19 @@ async function jwtFlow(): Promise<void> {
     body: JSON.stringify({ refreshToken: t2.refreshToken }),
   });
   assert(r4.status === 401, "family revoked after reuse 401");
+}
+
+// JWT alg-pinning guard: the accepted `algorithms` must include the signing
+// alg (HS256), else the strategy would reject its own tokens — fail fast.
+async function jwtAlgGuard(): Promise<void> {
+  const { auth } = createApi<Record<string, unknown>>({ title: "alg-guard" });
+  let threw = false;
+  try {
+    auth.jwt("jwt", { secret: "jwt-secret-32-chars-long!!", algorithms: ["HS512"] });
+  } catch {
+    threw = true;
+  }
+  assert(threw, "jwt throws when algorithms excludes the signing alg HS256");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -500,6 +527,7 @@ console.log();
 
 await check("Session create / lookup / logout", sessionFlow);
 await check("JWT issue / verify / rotate / reuse-revoke", jwtFlow);
+await check("JWT alg-pinning guard (HS256 must be accepted)", jwtAlgGuard);
 await check("OAuth (Google) start / callback with PKCE", oauthFlow);
 await check("OpenAPI securitySchemes emitted", openApiSchemes);
 await check("Strategies coexist in one app", coexistence);
@@ -507,6 +535,6 @@ await check("CSRF (opt-in) enforced on mutating requests", csrfFlow);
 await check("auth.strategy unified dispatch", strategyDispatch);
 
 console.log();
-console.log(`Result: ${passed}/7 passed, ${failed} failed`);
+console.log(`Result: ${passed}/${total} passed, ${failed} failed`);
 
 if (failed > 0) process.exit(1);

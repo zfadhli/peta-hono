@@ -1,31 +1,47 @@
 import type { Context } from "hono";
+import { jwtVerify, SignJWT } from "jose";
 import { APIError, type SecurityScheme } from "../openapi.js";
-import {
-  base64urlUtf8,
-  hmacSign,
-  hmacVerify,
-  randomToken,
-  sha256Hex,
-  utf8FromBase64url,
-} from "./crypto.js";
+import { randomToken, sha256Hex } from "./crypto.js";
 import { createMemoryRefreshTokenStore, type RefreshTokenStore } from "./store.js";
 
 /**
  * Built-in JWT access-token + refresh-token rotation strategy.
  *
- * Access tokens are HS256 JWTs signed with a shared secret; refresh tokens are
- * opaque, server-stored (hashed), rotated on every refresh, and revocation is
- * family-wide on reuse (a replayed rotated token revokes the whole family).
+ * Access tokens are compact JWTs signed with `jose` (HS256 by default; the
+ * audited library handles JWS serialization, constant-time verification, and
+ * `alg` pinning). Refresh tokens are opaque, server-stored (hashed), rotated on
+ * every refresh, and revocation is family-wide on reuse (a replayed rotated
+ * token revokes the whole family).
  *
- * ponytail: HS256 symmetric signing only — no asymmetric (RS256/EdDSA) key
- * support or JWKS yet, and the refresh store is in-memory by default (supply a
- * durable `store` for multi-replica deployments). A 32+ byte random secret is
- * strongly recommended for `secret`.
+ * ponytail: HS256 symmetric signing by default — asymmetric (RS256/EdDSA)/JWKS
+ * and key rotation are opt-in via `keys`/`jwks`/`algorithms` (see the ADR); the
+ * refresh store is in-memory by default (supply a durable `store` for
+ * multi-replica deployments). A 32+ byte random secret is recommended for
+ * `secret`.
  */
+
+/** JWT signature algorithms accepted by the strategy (pins `alg` at verify time). */
+export type JwtAlgorithm =
+  | "HS256"
+  | "HS384"
+  | "HS512"
+  | "RS256"
+  | "RS384"
+  | "RS512"
+  | "ES256"
+  | "ES384"
+  | "ES512"
+  | "EdDSA";
 
 export interface JwtStrategyOptions {
   /** HMAC signing secret (>= 32 random bytes recommended). Required. */
   secret: string;
+  /**
+   * Accepted JWT `alg` values (default `["HS256"]`); pins the algorithm. Must
+   * include the signing alg (`"HS256"`) so the strategy never rejects its own
+   * tokens — validated at construction.
+   */
+  algorithms?: JwtAlgorithm[];
   /** Access-token TTL in seconds (default 900 = 15 minutes). */
   accessTtl?: number;
   /** Refresh-token TTL in seconds (default 2592000 = 30 days). */
@@ -62,7 +78,7 @@ export interface JwtStrategy {
   verifyAccess(token: string): Promise<Record<string, unknown> | null>;
 }
 
-/** Sign a compact JWS (HS256). */
+/** Sign a compact JWT (default HS256) via `jose`. */
 async function signAccessToken(
   secret: string,
   claims: Record<string, unknown>,
@@ -73,48 +89,34 @@ async function signAccessToken(
   const now = Math.floor(Date.now() / 1000);
   // A unique `jti` makes each access token distinguishable (needed so a rotated
   // token's claims differ even when issued in the same second as a prior one).
-  const payload: Record<string, unknown> = {
-    ...claims,
-    jti: randomToken(16),
-    iat: now,
-    exp: now + ttlSeconds,
-  };
-  if (issuer) payload.iss = issuer;
-  if (audience) payload.aud = audience;
-
-  const header = base64urlUtf8(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-  const body = base64urlUtf8(JSON.stringify(payload));
-  const input = `${header}.${body}`;
-  const signature = await hmacSign(secret, input);
-  return `${input}.${signature}`;
+  let signer = new SignJWT({ ...claims })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setJti(randomToken(16))
+    .setIssuedAt(now)
+    .setExpirationTime(now + ttlSeconds);
+  if (issuer) signer = signer.setIssuer(issuer);
+  if (audience) signer = signer.setAudience(audience);
+  return signer.sign(new TextEncoder().encode(secret));
 }
 
-/** Verify a compact JWS (HS256) and return its payload, or `null`. */
+/** Verify a compact JWT via `jose`, honoring the pinned `algorithms`; or `null`. */
 async function verifyAccessToken(
   token: string,
   secret: string,
+  algorithms: string[],
   issuer: string | undefined,
   audience: string | undefined,
 ): Promise<Record<string, unknown> | null> {
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  const [header, body, sig] = parts as [string, string, string];
-  if (!(await hmacVerify(secret, `${header}.${body}`, sig))) return null;
-
-  let payload: Record<string, unknown>;
   try {
-    const parsed = JSON.parse(utf8FromBase64url(body!));
-    if (!parsed || typeof parsed !== "object") return null;
-    payload = parsed as Record<string, unknown>;
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret), {
+      algorithms,
+      issuer,
+      audience,
+    });
+    return payload as unknown as Record<string, unknown>;
   } catch {
     return null;
   }
-
-  const exp = payload.exp;
-  if (typeof exp !== "number" || exp < Math.floor(Date.now() / 1000)) return null;
-  if (issuer && payload.iss !== issuer) return null;
-  if (audience && payload.aud !== audience) return null;
-  return payload;
 }
 
 /**
@@ -124,6 +126,15 @@ async function verifyAccessToken(
  */
 export function buildJwtStrategy(name: string, opts: JwtStrategyOptions): JwtStrategy {
   const secret = opts.secret;
+  const algorithms = opts.algorithms ?? ["HS256"];
+  if (algorithms.length === 0) {
+    throw new Error("JWT algorithms must not be empty");
+  }
+  if (!algorithms.includes("HS256")) {
+    throw new Error(
+      `JWT algorithms must include the signing alg "HS256" (got: ${algorithms.join(", ")})`,
+    );
+  }
   const accessTtl = opts.accessTtl ?? 900;
   const refreshTtl = opts.refreshTtl ?? 2592000;
   const issuer = opts.issuer;
@@ -137,7 +148,7 @@ export function buildJwtStrategy(name: string, opts: JwtStrategyOptions): JwtStr
       const header = c.req.header("Authorization");
       if (!header?.startsWith("Bearer ")) throw new APIError(401, "Unauthorized");
       const token = header.slice(7).trim();
-      const payload = await verifyAccessToken(token, secret, issuer, audience);
+      const payload = await verifyAccessToken(token, secret, algorithms, issuer, audience);
       if (!payload) throw new APIError(401, "Invalid or expired access token");
       return payload;
     },
@@ -201,7 +212,7 @@ export function buildJwtStrategy(name: string, opts: JwtStrategyOptions): JwtStr
       await store.delete(await sha256Hex(refreshToken));
     },
     async verifyAccess(token) {
-      return verifyAccessToken(token, secret, issuer, audience);
+      return verifyAccessToken(token, secret, algorithms, issuer, audience);
     },
   };
 }
