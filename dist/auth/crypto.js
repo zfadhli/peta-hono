@@ -1,16 +1,21 @@
 /**
- * Shared Web Crypto primitives for the built-in auth strategies.
+ * Shared crypto primitives for the built-in auth strategies.
  *
- * Portable across Node (>=18 Web Crypto), Bun, Deno, and Cloudflare Workers —
- * depends only on `globalThis.crypto` / `TextEncoder` / `btoa` / `atob`, never
- * on `node:crypto`. Mirrors the Web Crypto usage already present in
- * `src/openapi.ts` (`sha1Hex`), keeping the library dependency-tree-light and
- * runnable anywhere Hono runs.
+ * The hard primitives (HMAC-SHA256, SHA-256, CSPRNG bytes) are delegated to the
+ * audited, zero-dependency `@noble/hashes` library; this module keeps the tiny
+ * encode/decode + constant-time helpers and exposes the narrow, stable surface
+ * the strategies import. Portable across Node (>=20.19), Bun, Deno, and
+ * Cloudflare Workers — depends only on `TextEncoder`/`btoa`/`atob` plus
+ * `@noble/hashes`, never on `node:crypto`.
  *
  * ponytail: no symmetric-key derivation / KDF sophistication here — the signing
  * secret is used raw as an HMAC key. Ceiling: support `iron-webcrypto` or argon2
- * for at-rest key handling, or an asymmetric (RS256/EdDSA) JWT scheme.
+ * for at-rest key handling, or an asymmetric (RS256/EdDSA) JWT scheme (see
+ * `jwt.ts`, which uses `jose`).
  */
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 const te = new TextEncoder();
 /** ASCII bytes → base64url (no padding). */
 export function base64urlEncode(bytes) {
@@ -37,26 +42,17 @@ export function base64urlUtf8(data) {
 export function utf8FromBase64url(s) {
     return new TextDecoder().decode(base64urlDecode(s));
 }
-async function hmacKey(secret) {
-    // Normalize to an exact ArrayBuffer-backed view (TS 5.7 `Uint8Array` default
-    // generic is ArrayBufferLike, which `BufferSource` rejects).
-    const keyMaterial = te.encode(secret);
-    return crypto.subtle.importKey("raw", keyMaterial, { name: "HMAC", hash: "SHA-256" }, false, [
-        "sign",
-        "verify",
-    ]);
+/** HMAC-SHA256 → raw bytes. */
+function hmacSha256(secret, data) {
+    return hmac(sha256, te.encode(secret), te.encode(data));
 }
 /** HMAC-SHA256 sign → base64url signature. */
 export async function hmacSign(secret, data) {
-    const key = await hmacKey(secret);
-    const sig = await crypto.subtle.sign("HMAC", key, te.encode(data));
-    return base64urlEncode(new Uint8Array(sig));
+    return base64urlEncode(hmacSha256(secret, data));
 }
 /** Constant-time HMAC-SHA256 verify against a base64url signature. */
 export async function hmacVerify(secret, data, signature) {
-    const key = await hmacKey(secret);
-    const expected = new Uint8Array(await crypto.subtle.sign("HMAC", key, te.encode(data)));
-    return timingSafeEqual(expected, decodeOrEmpty(signature));
+    return timingSafeEqual(hmacSha256(secret, data), decodeOrEmpty(signature));
 }
 /** Constant-time string/buffer comparison — prevents timing side-channels. */
 export function timingSafeEqual(a, b) {
@@ -69,21 +65,15 @@ export function timingSafeEqual(a, b) {
 }
 /** Cryptographically random base64url token (default 32 bytes ≈ 43 chars). */
 export function randomToken(bytes = 32) {
-    const buf = new Uint8Array(bytes);
-    crypto.getRandomValues(buf);
-    return base64urlEncode(buf);
+    return base64urlEncode(randomBytes(bytes));
 }
 /** SHA-256 hex digest of utf-8 data. */
 export async function sha256Hex(data) {
-    const digest = await crypto.subtle.digest("SHA-256", te.encode(data));
-    return Array.from(new Uint8Array(digest))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
+    return bytesToHex(sha256(te.encode(data)));
 }
 /** SHA-256 → base64url (used for PKCE S256 code-challenge derivation). */
 export async function sha256Base64url(data) {
-    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(data)));
-    return base64urlEncode(digest);
+    return base64urlEncode(sha256(te.encode(data)));
 }
 /** Decode a base64url signature to bytes, returning empty array on malformed input. */
 function decodeOrEmpty(s) {

@@ -1,15 +1,17 @@
 /**
- * Shared Web Crypto primitives for the built-in auth strategies.
+ * Shared crypto primitives for the built-in auth strategies.
  *
- * Portable across Node (>=18 Web Crypto), Bun, Deno, and Cloudflare Workers —
- * depends only on `globalThis.crypto` / `TextEncoder` / `btoa` / `atob`, never
- * on `node:crypto`. Mirrors the Web Crypto usage already present in
- * `src/openapi.ts` (`sha1Hex`), keeping the library dependency-tree-light and
- * runnable anywhere Hono runs.
+ * The hard primitives (HMAC-SHA256, SHA-256, CSPRNG bytes) are delegated to the
+ * audited, zero-dependency `@noble/hashes` library; this module keeps the tiny
+ * encode/decode + constant-time helpers and exposes the narrow, stable surface
+ * the strategies import. Portable across Node (>=20.19), Bun, Deno, and
+ * Cloudflare Workers — depends only on `TextEncoder`/`btoa`/`atob` plus
+ * `@noble/hashes`, never on `node:crypto`.
  *
  * ponytail: no symmetric-key derivation / KDF sophistication here — the signing
  * secret is used raw as an HMAC key. Ceiling: support `iron-webcrypto` or argon2
- * for at-rest key handling, or an asymmetric (RS256/EdDSA) JWT scheme.
+ * for at-rest key handling, or an asymmetric (RS256/EdDSA) JWT scheme (see
+ * `jwt.ts`, which uses `jose`).
  */
 /** ASCII bytes → base64url (no padding). */
 export declare function base64urlEncode(bytes: Uint8Array): string;

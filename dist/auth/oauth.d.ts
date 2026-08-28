@@ -15,14 +15,28 @@ import { type SecurityScheme } from "../openapi.js";
  * `components.securitySchemes`; it is a *flow*, not a request guard — protect
  * downstream routes with a `jwt` or `session` strategy's `{ auth: name }`.
  *
- * PKCE is enabled by default when `clientSecret` is omitted (SPA / public
- * clients). The `code_verifier` is never leaked: it travels only in the
- * signed, HttpOnly, short-lived state cookie.
+ * PKCE is enabled by default (even for confidential clients with a
+ * `clientSecret`). The `code_verifier` is never leaked: it travels only in the
+ * signed, HttpOnly, short-lived state cookie (now `Secure` by default). A
+ * provider `error` query param (user denies consent) is routed to `onError`.
  *
  * ponytail: `onSuccess` is the only integration point (no automatic JWT/session
  * issuance wired in). Token endpoint / userinfo are plain `fetch` calls —
  * override `tokenURL`/`userInfoURL`/`fetchFn` for tests or a proxy.
  */
+/** Cookie attribute block for the OAuth state cookie (defaults to `Secure`). */
+export interface OAuthStateCookieOptions {
+    /** `Secure` flag. Default `true`. */
+    secure?: boolean;
+    /** Rename to `__Host-<name>` and force `Secure` + `Path=/` + no `Domain`. */
+    hostPrefix?: boolean;
+    /** Cookie path (default `"/"`). */
+    path?: string;
+    /** `HttpOnly` flag (default true). */
+    httpOnly?: boolean;
+    /** `SameSite` attribute (default `"Lax"`). */
+    sameSite?: "Lax" | "Strict" | "None";
+}
 export interface OAuthStrategyOptions {
     provider?: "google";
     clientId: string;
@@ -38,8 +52,10 @@ export interface OAuthStrategyOptions {
     stateSecret?: string;
     stateCookieName?: string;
     stateTtlSeconds?: number;
-    /** PKCE (default `true` when no `clientSecret`, else `false`). */
+    /** PKCE (default `true`). */
     usePKCE?: boolean;
+    /** State-cookie attribute block (defaults to `secure: true`, host prefix off). */
+    stateCookie?: OAuthStateCookieOptions;
     /** Base path for the flow routes (default `"/auth/google"`). */
     path?: string;
     /** Override `fetch` (tests / proxy). Defaults to `globalThis.fetch`. */

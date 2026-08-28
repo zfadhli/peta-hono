@@ -12,6 +12,7 @@
 import { buildJwtStrategy } from "./jwt.js";
 import { buildOAuthStrategy } from "./oauth.js";
 import { buildSessionStrategy, } from "./session.js";
+export { cookieNameFor, createCookieTransport } from "./cookie.js";
 export { buildJwtStrategy } from "./jwt.js";
 export { buildOAuthStrategy } from "./oauth.js";
 export { buildSessionStrategy } from "./session.js";

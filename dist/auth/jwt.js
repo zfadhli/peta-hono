@@ -1,53 +1,59 @@
+import { createLocalJWKSet, createRemoteJWKSet, jwtVerify, SignJWT, } from "jose";
 import { APIError } from "../openapi.js";
-import { base64urlUtf8, hmacSign, hmacVerify, randomToken, sha256Hex, utf8FromBase64url, } from "./crypto.js";
+import { createCookieTransport } from "./cookie.js";
+import { randomToken, sha256Hex } from "./crypto.js";
 import { createMemoryRefreshTokenStore } from "./store.js";
-/** Sign a compact JWS (HS256). */
-async function signAccessToken(secret, claims, ttlSeconds, issuer, audience) {
+/** Sign a compact JWT via `jose` (HS256 by default, or the key-derived alg). */
+async function signAccessToken(key, claims, ttlSeconds, issuer, audience, kid, alg) {
     const now = Math.floor(Date.now() / 1000);
+    const header = { alg, typ: "JWT" };
+    if (kid)
+        header.kid = kid;
     // A unique `jti` makes each access token distinguishable (needed so a rotated
     // token's claims differ even when issued in the same second as a prior one).
-    const payload = {
-        ...claims,
-        jti: randomToken(16),
-        iat: now,
-        exp: now + ttlSeconds,
-    };
+    let signer = new SignJWT({ ...claims })
+        .setProtectedHeader(header)
+        .setJti(randomToken(16))
+        .setIssuedAt(now)
+        .setExpirationTime(now + ttlSeconds);
     if (issuer)
-        payload.iss = issuer;
+        signer = signer.setIssuer(issuer);
     if (audience)
-        payload.aud = audience;
-    const header = base64urlUtf8(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-    const body = base64urlUtf8(JSON.stringify(payload));
-    const input = `${header}.${body}`;
-    const signature = await hmacSign(secret, input);
-    return `${input}.${signature}`;
+        signer = signer.setAudience(audience);
+    const signMaterial = "secret" in key ? new TextEncoder().encode(key.secret) : key.key;
+    return signer.sign(signMaterial);
 }
-/** Verify a compact JWS (HS256) and return its payload, or `null`. */
-async function verifyAccessToken(token, secret, issuer, audience) {
-    const parts = token.split(".");
-    if (parts.length !== 3)
-        return null;
-    const [header, body, sig] = parts;
-    if (!(await hmacVerify(secret, `${header}.${body}`, sig)))
-        return null;
-    let payload;
+/** Verify a compact JWT via `jose`, honoring the pinned `algorithms`; or `null`. */
+async function verifyAccessToken(token, resolver, algorithms, issuer, audience) {
+    const options = { algorithms, issuer, audience };
     try {
-        const parsed = JSON.parse(utf8FromBase64url(body));
-        if (!parsed || typeof parsed !== "object")
-            return null;
-        payload = parsed;
+        const { payload } = resolver.kind === "single"
+            ? await jwtVerify(token, resolver.key, options)
+            : await jwtVerify(token, resolver.getKey, options);
+        return payload;
     }
     catch {
         return null;
     }
-    const exp = payload.exp;
-    if (typeof exp !== "number" || exp < Math.floor(Date.now() / 1000))
-        return null;
-    if (issuer && payload.iss !== issuer)
-        return null;
-    if (audience && payload.aud !== audience)
-        return null;
-    return payload;
+}
+/** Derive the JWS `alg` a signing key uses. Symmetric secrets are HS256. */
+function deriveSigningAlg(key) {
+    if ("secret" in key)
+        return "HS256";
+    const alg = key.key.algorithm.name;
+    if (alg === "Ed25519")
+        return "EdDSA";
+    if (alg === "RSASSA-PKCS1-v1_5")
+        return "RS256";
+    if (alg === "ECDSA") {
+        const curve = key.key.algorithm.namedCurve;
+        if (curve === "P-384")
+            return "ES384";
+        if (curve === "P-521")
+            return "ES512";
+        return "ES256";
+    }
+    throw new Error(`Unsupported JWT signing key algorithm: ${alg}`);
 }
 /**
  * Build a JWT strategy handle. The returned `middleware` is ready to be
@@ -55,12 +61,70 @@ async function verifyAccessToken(token, secret, issuer, audience) {
  * refresh / logout flows.
  */
 export function buildJwtStrategy(name, opts) {
+    const keys = opts.keys;
+    const hasKeys = !!keys && keys.length > 0;
     const secret = opts.secret;
+    const signKey = hasKeys
+        ? keys[0]
+        : secret
+            ? { kid: "k1", secret }
+            : undefined;
+    if (!signKey) {
+        throw new Error("JWT requires a `secret` or `keys` signing key");
+    }
+    const signingKid = hasKeys ? signKey.kid : undefined;
+    const signingAlg = deriveSigningAlg(signKey);
+    const algorithms = opts.algorithms ?? ["HS256"];
+    if (algorithms.length === 0) {
+        throw new Error("JWT algorithms must not be empty");
+    }
+    if (!algorithms.includes(signingAlg)) {
+        throw new Error(`JWT algorithms must include the signing alg "${signingAlg}" (got: ${algorithms.join(", ")})`);
+    }
+    // Verification key: `jwks` (asymmetric/multi-service) > `keys` (kid lookup) > `secret`.
+    let verifyResolver;
+    if (opts.jwks instanceof URL) {
+        verifyResolver = { kind: "keyset", getKey: createRemoteJWKSet(opts.jwks) };
+    }
+    else if (opts.jwks && "keys" in opts.jwks) {
+        verifyResolver = { kind: "keyset", getKey: createLocalJWKSet(opts.jwks) };
+    }
+    else if (hasKeys) {
+        const keyMap = new Map(keys.map((k) => [k.kid, k]));
+        verifyResolver = {
+            kind: "keyset",
+            getKey: async (protectedHeader) => {
+                const kid = protectedHeader.kid;
+                if (!kid)
+                    throw new Error("JWT token missing `kid`");
+                const k = keyMap.get(kid);
+                if (!k)
+                    throw new Error(`JWT token has unknown kid: ${kid}`);
+                return "secret" in k ? new TextEncoder().encode(k.secret) : k.key;
+            },
+        };
+    }
+    else if (secret) {
+        verifyResolver = { kind: "single", key: new TextEncoder().encode(secret) };
+    }
+    else {
+        throw new Error("JWT requires a `secret`, `keys`, or `jwks` for verification");
+    }
     const accessTtl = opts.accessTtl ?? 900;
     const refreshTtl = opts.refreshTtl ?? 2592000;
     const issuer = opts.issuer;
     const audience = opts.audience;
     const store = opts.store ?? createMemoryRefreshTokenStore();
+    const refreshTransport = opts.refreshTransport
+        ? createCookieTransport({
+            name: opts.refreshTransport.cookie.name,
+            path: opts.refreshTransport.cookie.path ?? "/",
+            hostPrefix: opts.refreshTransport.cookie.hostPrefix ?? false,
+            secure: opts.refreshTransport.cookie.secure ?? true,
+            sameSite: opts.refreshTransport.cookie.sameSite ?? "Lax",
+            httpOnly: opts.refreshTransport.cookie.httpOnly ?? true,
+        })
+        : undefined;
     return {
         name,
         scheme: { type: "http", scheme: "bearer" },
@@ -69,15 +133,15 @@ export function buildJwtStrategy(name, opts) {
             if (!header?.startsWith("Bearer "))
                 throw new APIError(401, "Unauthorized");
             const token = header.slice(7).trim();
-            const payload = await verifyAccessToken(token, secret, issuer, audience);
+            const payload = await verifyAccessToken(token, verifyResolver, algorithms, issuer, audience);
             if (!payload)
                 throw new APIError(401, "Invalid or expired access token");
             return payload;
         },
-        async issue(sub, claims = {}) {
+        async issue(sub, claims = {}, c) {
             if (!sub)
                 throw new APIError(400, "sub is required to issue a token");
-            const accessToken = await signAccessToken(secret, { sub, ...claims }, accessTtl, issuer, audience);
+            const accessToken = await signAccessToken(signKey, { sub, ...claims }, accessTtl, issuer, audience, signingKid, signingAlg);
             const refreshToken = randomToken(32);
             const familyId = randomToken(16);
             await store.save({
@@ -87,9 +151,11 @@ export function buildJwtStrategy(name, opts) {
                 expiresAt: Date.now() + refreshTtl * 1000,
                 used: false,
             });
+            if (refreshTransport && c)
+                refreshTransport.set(c, refreshToken);
             return { accessToken, refreshToken, expiresIn: accessTtl };
         },
-        async refresh(refreshToken) {
+        async refresh(refreshToken, c) {
             if (!refreshToken)
                 throw new APIError(400, "Missing refresh token");
             const tokenHash = await sha256Hex(refreshToken);
@@ -109,7 +175,7 @@ export function buildJwtStrategy(name, opts) {
             // Rotate: mark this token single-use, issue a fresh one in the same family.
             record.used = true;
             await store.save(record);
-            const accessToken = await signAccessToken(secret, { sub: record.sub }, accessTtl, issuer, audience);
+            const accessToken = await signAccessToken(signKey, { sub: record.sub }, accessTtl, issuer, audience, signingKid, signingAlg);
             const newRefreshToken = randomToken(32);
             await store.save({
                 tokenHash: await sha256Hex(newRefreshToken),
@@ -118,15 +184,19 @@ export function buildJwtStrategy(name, opts) {
                 expiresAt: Date.now() + refreshTtl * 1000,
                 used: false,
             });
+            if (refreshTransport && c)
+                refreshTransport.set(c, newRefreshToken);
             return { accessToken, refreshToken: newRefreshToken, expiresIn: accessTtl };
         },
-        async revoke(refreshToken) {
+        async revoke(refreshToken, c) {
             if (!refreshToken)
                 return;
             await store.delete(await sha256Hex(refreshToken));
+            if (refreshTransport && c)
+                refreshTransport.clear(c);
         },
         async verifyAccess(token) {
-            return verifyAccessToken(token, secret, issuer, audience);
+            return verifyAccessToken(token, verifyResolver, algorithms, issuer, audience);
         },
     };
 }

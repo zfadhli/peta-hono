@@ -12,12 +12,13 @@
 import { type JwtStrategy, type JwtStrategyOptions } from "./jwt.js";
 import { type OAuthStrategy, type OAuthStrategyOptions } from "./oauth.js";
 import { type SessionStrategy, type SessionStrategyOptions } from "./session.js";
-export type { CookieSerializeOptions } from "./cookie.js";
-export type { IssuedTokens, JwtStrategy, JwtStrategyOptions } from "./jwt.js";
+export type { CookieSerializeOptions, CookieTransport, CookieTransportOptions, } from "./cookie.js";
+export { cookieNameFor, createCookieTransport } from "./cookie.js";
+export type { IssuedTokens, JwtKey, JwtStrategy, JwtStrategyOptions, RefreshTransportOptions, } from "./jwt.js";
 export { buildJwtStrategy } from "./jwt.js";
-export type { FlowApp, OAuthStrategy, OAuthStrategyOptions, OAuthSuccessEvent } from "./oauth.js";
+export type { FlowApp, OAuthStateCookieOptions, OAuthStrategy, OAuthStrategyOptions, OAuthSuccessEvent, } from "./oauth.js";
 export { buildOAuthStrategy } from "./oauth.js";
-export type { SessionStrategy, SessionStrategyOptions } from "./session.js";
+export type { SessionCookieOptions, SessionCsrf, SessionStrategy, SessionStrategyOptions, } from "./session.js";
 export { buildSessionStrategy } from "./session.js";
 export type { RefreshTokenRecord, RefreshTokenStore, SessionStore } from "./store.js";
 export { createMemoryRefreshTokenStore, createMemorySessionStore } from "./store.js";

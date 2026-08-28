@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-29
+
 ### Added
 
 - **`jose` for the JWT layer (ADR-013)** — `src/auth/jwt.ts` now signs/verifies via `jose` `SignJWT`/`jwtVerify` instead of hand-rolled JWS (landed as part of the auth-lean hardening). Opt-in capability: `keys`/`kid` rotation, `jwks` (a `URL` or `{ keys: JWK[] }`) for local/remote JWKS, asymmetric signing (RS256/EdDSA via a `CryptoKey`), `algorithms` alg-pinning (default `["HS256"]`; must include the signing alg), and `refreshTransport` (an HttpOnly refresh cookie set/cleared via `CookieTransport` on `issue`/`refresh`/`revoke`). Existing single-`secret` callers are unchanged (HS256, no `kid`, body-only tokens).
