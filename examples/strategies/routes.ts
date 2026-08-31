@@ -22,6 +22,17 @@ import { hashPassword, verifyPassword } from "../../src/password.js";
  * The demo user is a fixed map — plug in a DB for production.
  */
 
+// Credential-bearing config. In a real deployment these MUST come from the
+// environment (or a secrets manager) — never from a committed literal. The env
+// reads below keep the example runnable out-of-the-box (each fallback is a
+// deliberate non-secret `replace-this`/`example` template) while documenting the
+// production pattern: a deployed app sets SESSION_SECRET, JWT_SECRET,
+// GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and commits no real values.
+const env = (name: string, fallback: string): string => {
+  const v = process.env[name];
+  return v && v.length > 0 ? v : fallback;
+};
+
 const users = new Map<string, { id: string; email: string }>([
   ["alice@example.com", { id: "u_alice", email: "alice@example.com" }],
 ]);
@@ -37,7 +48,7 @@ const { api, auth, docs, app } = createApi<{ userId?: string; email?: string; su
 
 // --- Session strategy (cookie) ---
 const session = auth.session("session", {
-  secret: "replace-this-32-byte-session-secret!!",
+  secret: env("SESSION_SECRET", "replace-this-32-byte-session-secret!!"),
   cookieName: "sid",
   // CSRF defaults to `"origin"`: a cross-site mutating request (mismatched
   // `Origin` or `Sec-Fetch-Site: cross-site`) is rejected 403 with no client
@@ -55,8 +66,8 @@ const jwt = auth.jwt("jwt", {
   // key up by the token's `kid` (an unknown/missing `kid` is rejected). Rotate
   // by prepending a new key and dropping the retired one.
   keys: [
-    { kid: "2026-08", secret: "replace-this-32-byte-jwt-secret!!" },
-    { kid: "2025-11", secret: "older-rotated-out-secret-32-bytes!!" },
+    { kid: "2026-08", secret: env("JWT_SECRET", "replace-this-32-byte-jwt-secret!!") },
+    { kid: "2025-11", secret: env("JWT_SECRET_OLD", "older-rotated-out-secret-32-bytes!!") },
   ],
   // `algorithms` pins the accepted `alg` (must include the signing alg). Signing
   // with `keys[0]` (an HMAC secret) is HS256, so HS256 must be accepted.
@@ -80,8 +91,8 @@ const jwt = auth.jwt("jwt", {
 // ponytail: mock endpoints so the example runs without real Google creds. A real
 // app passes clientId/clientSecret/redirectUri and omits fetchFn.
 auth.oauth("google", {
-  clientId: "example-client-id",
-  clientSecret: "example-client-secret",
+  clientId: env("GOOGLE_CLIENT_ID", "example-client-id"),
+  clientSecret: env("GOOGLE_CLIENT_SECRET", "example-client-secret"),
   redirectUri: "http://localhost:3000/auth/google/callback",
   scopes: ["openid", "email", "profile"],
   // PKCE is on by default (even with a clientSecret) — no `usePKCE` needed.

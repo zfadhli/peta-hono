@@ -20,8 +20,12 @@ const { api, auth, docs, app } = createApi<{ user: { id: string; email: string }
   version: "1.0.0",
 });
 
-// ponytail: hardcoded password for demo — load from env in production
-app.use("*", session({ password: "a".repeat(32), cookieName: "session" }));
+// ponytail: hardcoded password for demo — load from a real secret in production.
+// The env read keeps the example runnable out-of-the-box (the `a`.repeat(32)
+// fallback is a non-secret template) while documenting the production pattern:
+// set SESSION_PASSWORD and never commit a real value.
+const sessionPassword = process.env.SESSION_PASSWORD ?? "a".repeat(32);
+app.use("*", session({ password: sessionPassword, cookieName: "session" }));
 
 // Bridge peta-auth session → peta-hono typed auth context
 auth(
