@@ -21,6 +21,7 @@ import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { createApi } from "./api.js";
 import { createCookieTransport, parseCookies, serializeCookie } from "./auth/cookie.js";
+import { generateKey } from "./index.js";
 
 /** Extract `name=value` from a Set-Cookie response header. */
 function cookieValue(res: Response): string {
@@ -881,6 +882,68 @@ describe("built-in auth strategies", () => {
       headers: { authorization: `Bearer ${t.accessToken}` },
     });
     expect(me.status, "RS256 guarded route 200").toBe(200);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 12b. generateKey() — asymmetric keypair helper (default RS256 / EdDSA / RS384)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it("generateKey() wires straight into keys/jwks/algorithms (RS256 default)", async () => {
+    // No `algorithm` → defaults to RS256, and the public JWK is stamped with kid+alg.
+    const { kid, privateKey, publicJwk } = await generateKey({ kid: "gen-1" });
+    expect(kid, "generateKey kid").toBe("gen-1");
+    expect(publicJwk.kty, "generateKey RS256 kty").toBe("RSA");
+    expect(publicJwk.alg, "generateKey default alg RS256").toBe("RS256");
+    expect(publicJwk.kid, "generateKey kid on publicJwk").toBe("gen-1");
+    expect(publicJwk.n, "generateKey RS256 modulus present").toBeTruthy();
+
+    // The returned key/JWK drop straight into `keys`/`jwks` (with `algorithms`
+    // accepting the signing alg) — no hand-rolled crypto.subtle wiring.
+    const { api, auth, docs, app } = createApi<Record<string, unknown>>({ title: "jwt-gen-rs" });
+    const jwt = auth.jwt("jwt", {
+      keys: [{ kid, key: privateKey }],
+      jwks: { keys: [publicJwk] },
+      algorithms: ["RS256"],
+    });
+    api.post("/login", {}, async () => jwt.issue("user-1"));
+    docs();
+    const login = await app.request("/login", { method: "POST" });
+    const t: any = await login.json();
+    const header = JSON.parse(Buffer.from(t.accessToken.split(".")[0]!, "base64url").toString());
+    expect(header.alg, "generateKey RS256 token alg").toBe("RS256");
+    expect(header.kid, "generateKey RS256 token kid").toBe("gen-1");
+    expect((await jwt.verifyAccess(t.accessToken))?.sub, "generateKey RS256 verify").toBe("user-1");
+  });
+
+  it("generateKey() EdDSA round-trips", async () => {
+    const { kid, privateKey, publicJwk } = await generateKey({ algorithm: "EdDSA" });
+    expect(publicJwk.kty, "generateKey EdDSA kty OKP").toBe("OKP");
+    expect(publicJwk.crv, "generateKey EdDSA crv Ed25519").toBe("Ed25519");
+    expect(publicJwk.alg, "generateKey EdDSA alg").toBe("EdDSA");
+
+    const { auth } = createApi<Record<string, unknown>>({ title: "jwt-gen-ed" });
+    const jwt = auth.jwt("ed", {
+      keys: [{ kid, key: privateKey }],
+      jwks: { keys: [publicJwk] },
+      algorithms: ["EdDSA"],
+    });
+    const t = await jwt.issue("user-1");
+    expect((await jwt.verifyAccess(t.accessToken))?.sub, "generateKey EdDSA verify").toBe("user-1");
+  });
+
+  it("generateKey() RS384 (RSA-hash disambiguation)", async () => {
+    const { kid, privateKey, publicJwk } = await generateKey({ algorithm: "RS384" });
+    expect(publicJwk.alg, "generateKey RS384 alg").toBe("RS384");
+    const { auth } = createApi<Record<string, unknown>>({ title: "jwt-gen-rs384" });
+    // `algorithms` must accept the signing alg (RS384). This validates that
+    // deriveSigningAlg maps an SHA-384 RSA key to RS384, not RS256.
+    const jwt = auth.jwt("rs384", {
+      keys: [{ kid, key: privateKey }],
+      jwks: { keys: [publicJwk] },
+      algorithms: ["RS384"],
+    });
+    const t = await jwt.issue("user-1");
+    expect((await jwt.verifyAccess(t.accessToken))?.sub, "generateKey RS384 verify").toBe("user-1");
   });
 
   // ─────────────────────────────────────────────────────────────────────────

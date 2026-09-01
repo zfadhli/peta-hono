@@ -14,7 +14,9 @@ import { type RefreshTokenStore } from "./store.js";
  * whole family).
  *
  * ponytail: HS256 symmetric signing by default. Asymmetric (RS256/EdDSA)/JWKS and
- * key rotation are opt-in via `keys`/`jwks`/`algorithms`; the refresh store is
+ * key rotation are opt-in via `keys`/`jwks`/`algorithms` — `generateKey()` builds a
+ * ready-to-wire asymmetric keypair so that happy path is a few lines instead of
+ * hand-rolling `crypto.subtle.generateKey`+`exportKey`. The refresh store is
  * in-memory by default (supply a durable `store` for multi-replica deployments).
  * A 32+ byte random secret is recommended for `secret`.
  */
@@ -31,6 +33,28 @@ export type JwtKey = {
     kid: string;
     key: CryptoKey;
 };
+/** Asymmetric signature algorithms `generateKey()` can produce (excludes the symmetric `HS*`). */
+export type AsymmetricJwtAlgorithm = Exclude<JwtAlgorithm, "HS256" | "HS384" | "HS512">;
+/** Options for `generateKey()`. */
+export interface GenerateKeyOptions {
+    /**
+     * Signature algorithm to generate a keypair for (default `"RS256"`).
+     * Wire the result into the strategy's `keys`/`jwks` (and set `algorithms` to
+     * accept the signing alg).
+     */
+    algorithm?: AsymmetricJwtAlgorithm;
+    /** Key id to stamp on the JWK and the JWT header. Default: a random value. */
+    kid?: string;
+}
+/** A freshly generated asymmetric keypair, ready to wire into `keys`/`jwks`. */
+export interface GeneratedJwtKey {
+    /** Key id — stamped in the JWT header and on `publicJwk`. */
+    kid: string;
+    /** Signing key — pass as `keys: [{ kid, key: privateKey }]`. */
+    privateKey: CryptoKey;
+    /** Public JWK (with `kid` + `alg`) — pass as `jwks: { keys: [publicJwk] }`. */
+    publicJwk: JWK;
+}
 /** The config for an HttpOnly refresh-token cookie transported via `CookieTransport`. */
 export interface RefreshTransportOptions {
     /** Refresh-cookie options (HttpOnly by default). */
@@ -115,6 +139,28 @@ export interface JwtStrategy {
     /** Verify an access token; returns the payload or `null`. */
     verifyAccess(token: string): Promise<Record<string, unknown> | null>;
 }
+/**
+ * Generate an asymmetric keypair for JWT signing/verification.
+ *
+ * Returns the signing `CryptoKey` and a public JWK (stamped with `kid` + `alg`)
+ * that is directly accepted by the strategy's `jwks` option, so the asymmetric
+ * (RS256/EdDSA) + JWKS + rotation happy path is a few lines instead of wiring
+ * `crypto.subtle.generateKey` + `crypto.subtle.exportKey` by hand:
+ *
+ * ```ts
+ * const { kid, privateKey, publicJwk } = await generateKey({ algorithm: "RS256" });
+ * const jwt = auth.jwt("jwt", {
+ *   keys: [{ kid, key: privateKey }],
+ *   jwks: { keys: [publicJwk] },
+ *   algorithms: ["RS256"], // must accept the signing alg
+ * });
+ * ```
+ *
+ * The keypair is generated `extractable` so the public JWK can be exported for
+ * a JWKS endpoint; keep the private key in protected storage (it is only used
+ * in-process to sign).
+ */
+export declare function generateKey(opts?: GenerateKeyOptions): Promise<GeneratedJwtKey>;
 /**
  * Build a JWT strategy handle. The returned `middleware` is ready to be
  * registered as an auth gate (`{ auth: name }`); the helpers drive login /

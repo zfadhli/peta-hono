@@ -30,7 +30,9 @@ import { createMemoryRefreshTokenStore, type RefreshTokenStore } from "./store.j
  * whole family).
  *
  * ponytail: HS256 symmetric signing by default. Asymmetric (RS256/EdDSA)/JWKS and
- * key rotation are opt-in via `keys`/`jwks`/`algorithms`; the refresh store is
+ * key rotation are opt-in via `keys`/`jwks`/`algorithms` — `generateKey()` builds a
+ * ready-to-wire asymmetric keypair so that happy path is a few lines instead of
+ * hand-rolling `crypto.subtle.generateKey`+`exportKey`. The refresh store is
  * in-memory by default (supply a durable `store` for multi-replica deployments).
  * A 32+ byte random secret is recommended for `secret`.
  */
@@ -53,6 +55,31 @@ export type JwtAlgorithm =
  * `CryptoKey` (private for signing, public for verification).
  */
 export type JwtKey = { kid: string; secret: string } | { kid: string; key: CryptoKey };
+
+/** Asymmetric signature algorithms `generateKey()` can produce (excludes the symmetric `HS*`). */
+export type AsymmetricJwtAlgorithm = Exclude<JwtAlgorithm, "HS256" | "HS384" | "HS512">;
+
+/** Options for `generateKey()`. */
+export interface GenerateKeyOptions {
+  /**
+   * Signature algorithm to generate a keypair for (default `"RS256"`).
+   * Wire the result into the strategy's `keys`/`jwks` (and set `algorithms` to
+   * accept the signing alg).
+   */
+  algorithm?: AsymmetricJwtAlgorithm;
+  /** Key id to stamp on the JWK and the JWT header. Default: a random value. */
+  kid?: string;
+}
+
+/** A freshly generated asymmetric keypair, ready to wire into `keys`/`jwks`. */
+export interface GeneratedJwtKey {
+  /** Key id — stamped in the JWT header and on `publicJwk`. */
+  kid: string;
+  /** Signing key — pass as `keys: [{ kid, key: privateKey }]`. */
+  privateKey: CryptoKey;
+  /** Public JWK (with `kid` + `alg`) — pass as `jwks: { keys: [publicJwk] }`. */
+  publicJwk: JWK;
+}
 
 /** The config for an HttpOnly refresh-token cookie transported via `CookieTransport`. */
 export interface RefreshTransportOptions {
@@ -202,7 +229,13 @@ function deriveSigningAlg(key: JwtKey): JwtAlgorithm {
   if ("secret" in key) return "HS256";
   const alg = key.key.algorithm.name;
   if (alg === "Ed25519") return "EdDSA";
-  if (alg === "RSASSA-PKCS1-v1_5") return "RS256";
+  if (alg === "RSASSA-PKCS1-v1_5") {
+    // RSA shares one algorithm name across RS256/384/512 — the hash disambiguates.
+    const hash = (key.key.algorithm as RsaHashedKeyAlgorithm).hash?.name;
+    if (hash === "SHA-384") return "RS384";
+    if (hash === "SHA-512") return "RS512";
+    return "RS256";
+  }
   if (alg === "ECDSA") {
     const curve = (key.key.algorithm as { namedCurve?: string }).namedCurve;
     if (curve === "P-384") return "ES384";
@@ -210,6 +243,76 @@ function deriveSigningAlg(key: JwtKey): JwtAlgorithm {
     return "ES256";
   }
   throw new Error(`Unsupported JWT signing key algorithm: ${alg}`);
+}
+
+/** Web Crypto `generateKey` parameters for an asymmetric JWT algorithm. */
+function keyGenParams(
+  alg: AsymmetricJwtAlgorithm,
+): RsaHashedKeyGenParams | EcKeyGenParams | AlgorithmIdentifier {
+  switch (alg) {
+    case "RS256":
+      return {
+        name: "RSASSA-PKCS1-v1_5",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256",
+      };
+    case "RS384":
+      return {
+        name: "RSASSA-PKCS1-v1_5",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-384",
+      };
+    case "RS512":
+      return {
+        name: "RSASSA-PKCS1-v1_5",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-512",
+      };
+    case "ES256":
+      return { name: "ECDSA", namedCurve: "P-256" };
+    case "ES384":
+      return { name: "ECDSA", namedCurve: "P-384" };
+    case "ES512":
+      return { name: "ECDSA", namedCurve: "P-521" };
+    case "EdDSA":
+      return { name: "Ed25519" };
+  }
+}
+
+/**
+ * Generate an asymmetric keypair for JWT signing/verification.
+ *
+ * Returns the signing `CryptoKey` and a public JWK (stamped with `kid` + `alg`)
+ * that is directly accepted by the strategy's `jwks` option, so the asymmetric
+ * (RS256/EdDSA) + JWKS + rotation happy path is a few lines instead of wiring
+ * `crypto.subtle.generateKey` + `crypto.subtle.exportKey` by hand:
+ *
+ * ```ts
+ * const { kid, privateKey, publicJwk } = await generateKey({ algorithm: "RS256" });
+ * const jwt = auth.jwt("jwt", {
+ *   keys: [{ kid, key: privateKey }],
+ *   jwks: { keys: [publicJwk] },
+ *   algorithms: ["RS256"], // must accept the signing alg
+ * });
+ * ```
+ *
+ * The keypair is generated `extractable` so the public JWK can be exported for
+ * a JWKS endpoint; keep the private key in protected storage (it is only used
+ * in-process to sign).
+ */
+export async function generateKey(opts: GenerateKeyOptions = {}): Promise<GeneratedJwtKey> {
+  const algorithm = opts.algorithm ?? "RS256";
+  const kid = opts.kid ?? randomToken(16);
+  const keyPair = (await crypto.subtle.generateKey(keyGenParams(algorithm), true, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair;
+  const exported = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
+  const publicJwk = { ...exported, kid, alg: algorithm } as JWK;
+  return { kid, privateKey: keyPair.privateKey, publicJwk };
 }
 
 /**

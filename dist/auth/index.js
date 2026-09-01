@@ -13,7 +13,7 @@ import { buildJwtStrategy } from "./jwt.js";
 import { buildOAuthStrategy } from "./oauth.js";
 import { buildSessionStrategy, } from "./session.js";
 export { cookieNameFor, createCookieTransport } from "./cookie.js";
-export { buildJwtStrategy } from "./jwt.js";
+export { buildJwtStrategy, generateKey } from "./jwt.js";
 export { buildOAuthStrategy } from "./oauth.js";
 export { buildSessionStrategy } from "./session.js";
 // Shared primitives (store adapters / crypto / cookie) are public so users can

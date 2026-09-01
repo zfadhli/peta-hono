@@ -4,11 +4,14 @@ export type { AuthScheme, HttpMethod, Method, SecurityScheme } from "./api.js";
 // --- High-level (primary API) ---
 export { APIError, createApi, errors, fail, httpErrors } from "./api.js";
 export type {
+  AsymmetricJwtAlgorithm,
   AuthStrategySpec,
   CookieSerializeOptions,
   CookieTransport,
   CookieTransportOptions,
   FlowApp,
+  GeneratedJwtKey,
+  GenerateKeyOptions,
   IssuedTokens,
   JwtKey,
   JwtStrategy,
@@ -32,6 +35,7 @@ export {
   createCookieTransport,
   createMemoryRefreshTokenStore,
   createMemorySessionStore,
+  generateKey,
 } from "./auth/index.js";
 export type { ArkType, OAuth2Flows, RouteConfig } from "./openapi.js";
 // --- Low-level (advanced use) ---

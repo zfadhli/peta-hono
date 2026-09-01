@@ -25,13 +25,16 @@ export type {
 } from "./cookie.js";
 export { cookieNameFor, createCookieTransport } from "./cookie.js";
 export type {
+  AsymmetricJwtAlgorithm,
+  GeneratedJwtKey,
+  GenerateKeyOptions,
   IssuedTokens,
   JwtKey,
   JwtStrategy,
   JwtStrategyOptions,
   RefreshTransportOptions,
 } from "./jwt.js";
-export { buildJwtStrategy } from "./jwt.js";
+export { buildJwtStrategy, generateKey } from "./jwt.js";
 export type {
   FlowApp,
   OAuthStateCookieOptions,

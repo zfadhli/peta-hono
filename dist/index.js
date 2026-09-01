@@ -2,7 +2,7 @@
 // --- High-level (primary API) ---
 export { APIError, createApi, errors, fail, httpErrors } from "./api.js";
 // --- Built-in auth strategies (store adapters + strategy types) ---
-export { cookieNameFor, createCookieTransport, createMemoryRefreshTokenStore, createMemorySessionStore, } from "./auth/index.js";
+export { cookieNameFor, createCookieTransport, createMemoryRefreshTokenStore, createMemorySessionStore, generateKey, } from "./auth/index.js";
 // --- Low-level (advanced use) ---
 export { arktypeValidator, normalizeMethod, OpenAPIHono } from "./openapi.js";
 //# sourceMappingURL=index.js.map

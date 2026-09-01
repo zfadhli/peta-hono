@@ -77,6 +77,14 @@ homegrown `signAccessToken`/`verifyAccessToken` in `src/auth/jwt.ts` with `jose`
   HS256 tokens with no `kid`; `algorithms` defaults to `["HS256"]`; no refresh
   cookie is set without `refreshTransport`. The `algorithms` construction guard
   (must include the signing alg) is a fail-fast improvement, not a break.
+- **Asymmetric happy path unlocked** — `generateKey({ algorithm?, kid? })` returns a
+  ready-to-wire asymmetric keypair (`{ kid, privateKey, publicJwk }`, `publicJwk`
+  stamped `kid`+`alg`), so `keys: [{ kid, key: privateKey }]` + `jwks: { keys:
+  [publicJwk] }` (with `algorithms` accepting the signing alg) is RS256/EdDSA +
+  rotation in a few lines instead of hand-rolling `crypto.subtle.generateKey`/
+  `exportKey`. `deriveSigningAlg` now reads the RSA key's hash to distinguish
+  RS256/RS384/RS512 (previously every RSA key derived `RS256`). Additive; no
+  change to existing `secret`-only callers.
 - **Boundary** — `jose` does not do cookies, CSRF, sessions, or passwords. Those
   remain the library's thin helpers (cookie serialize/parse, the session
   strategy, and the opt-in `peta-hono/password` scrypt helper).
