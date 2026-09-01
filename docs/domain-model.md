@@ -61,7 +61,7 @@ Source of truth for naming; ADRs reference these terms. See `docs/glossary.md` f
 | **ComponentRegistry** | OpenAPI | Aggregate | `{schemas:Map<string,JsonSchema>, securitySchemes:Map<string,SecurityScheme>}` — hoists `$defs` to stable names | Key `schema_<sha1Hex(normalizeRefs(JSON.stringify(def))).slice(0,12)>` |
 | **StoredRoute** | OpenAPI | Entity | Persisted `{method:string(lower), oapiPath:string, config:RouteConfig, handler:RouteHandler}` in `_routes[]` insertion order | Drives both Hono dispatch (`this.on`) and `_buildSpec` iteration |
 | **ArktypeValidator** | Validation | Middleware | `arktypeValidator(target:"json"\|"query"\|"header"\|"param", schema)` → `validator(target, fn)` that coerces then **throws `APIError(400, summary)`** on `ArkErrors` | Never returns `Response` — routes through `app.onError` (regression guard selfcheck #5) |
-| **DocsMount** | OpenAPI | VO | `docs(specPath?,uiPath?)` or `docs({specPath?,uiPath?})` — `app.doc(specPath, {openapi:"3.0.0",info})` + `app.get(uiPath, apiReference({spec:{url:specPath}}))` | Must be called after side-effect route imports |
+| **DocsMount** | OpenAPI | VO | `docs(specPath?,uiPath?)` or `docs({specPath?,uiPath?,auth?})` — `app.doc(specPath, {openapi:"3.0.0",info})` + `app.get(uiPath, apiReference({spec:{url:specPath}}))`. `auth` (optional) gates both routes with a `MiddlewareHandler` or a registered auth name, registered before mounting | Must be called after side-effect route imports |
 
 ---
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`docs({ auth })` opt-in docs guard** — `docs()` now accepts an optional `auth` (a raw Hono `MiddlewareHandler`, or a registered auth name like `'session'`) to gate both the OpenAPI spec and the Scalar UI route. The guard is registered **before** mounting (the auth-guarded recipe, hand-`app.use` boilerplate removed) and rejects via the same throw-to-onError path as route auth. The unauthenticated default is unchanged (non-breaking); an unregistered auth name throws (mirrors `api()`'s guard).
+
 ## [0.6.2] - 2026-08-29
 
 ### Changed

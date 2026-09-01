@@ -111,7 +111,7 @@ Run with `nub index.ts` (or `node index.ts` if you've built the lib).
   - `auth.strategy(name, { type: 'session' | 'jwt' | 'oauth', ... })` — unified dispatch over the same builders.
   - Stores are injectable: `createMemorySessionStore()` / `createMemoryRefreshTokenStore()`, or any object implementing `SessionStore` / `RefreshTokenStore` for production. **ponytail:** the default stores are in-memory (process-local, lost on restart) — a real deployment should supply a durable store (Postgres/Redis/KV) that implements the same interface. The contracts are tiny (`SessionStore`: `get`/`set`/`delete`; `RefreshTokenStore`: `get`/`save`/`delete`/`getFamily`/`deleteFamily`), so a DB adapter is a small table mapping: a session row holds `sid` + a `data` JSON blob + `expires_at` (pruned on `get`), and a refresh-token row holds `token_hash` + `sub` + `family_id` + `expires_at` + `used`, with `getFamily`/`deleteFamily` filtering on `family_id`. See `examples/blog/db.ts` for the SQLite+Drizzle pattern and `src/auth/store.ts` for the exact interfaces.
   - **Opt-in password hashing** — `import { hashPassword, verifyPassword } from 'peta-hono/password'`. `hashPassword` returns a self-describing `scrypt` hash (work factors + salt + derived key, via `@noble/hashes`); `verifyPassword` re-derives and constant-time-compares. scrypt is the default (argon2id is ~5× slower in pure JS). **`ponytail:`** credential hashing only — it does not manage users/passwords/sessions (that stays the caller's job).
-- **`docs(specPath?, uiPath?)` / `docs({ specPath?, uiPath? })`** — mounts the OpenAPI JSON spec and Scalar docs UI. Both positional (`docs("/openapi.json", "/docs")`) and options-object (`docs({ specPath, uiPath })`) forms are supported.
+- **`docs(specPath?, uiPath?)` / `docs({ specPath?, uiPath? })`** — mounts the OpenAPI JSON spec and Scalar docs UI. Both positional (`docs("/openapi.json", "/docs")`) and options-object (`docs({ specPath, uiPath })`) forms are supported. **`docs({ auth })` opt-in guard** — pass a raw Hono `MiddlewareHandler` or a registered auth name (e.g. `docs({ auth: 'session' })`) to gate both the spec and UI routes. The guard is registered before mounting (the auth-guarded recipe, no `app.use` boilerplate) and rejects via the same throw-to-onError path as route auth. The unauthenticated default is unchanged (non-breaking).
 - **Header schemas must use lowercase keys** — Hono lowercases incoming headers via Fetch `Headers`; declare `type({ "x-api-key": "string" })` not `type({ "X-Api-Key": "string" })`. The spec emits lowercased header param names so runtime and docs match (`_addObjectParams` lowercases when `in === "header"`).
 - **Path params & `{regex}`** — `:name`, `:id?`, `:id{[0-9]+}` are parsed from the path and typed at the top level. **The `{regex}` in `:param{regex}` is enforced by Hono's router, not the ArkType param validator** — a mismatch produces a 404 (route doesn't match), and the ArkType schema types/validates the segment as `string`.
 - **Success code default** — the handler/status defaults to `status`, else the **lowest** declared 2xx/3xx response, else `200`. Because object keys are enumerated in ascending numeric order, `{ 200, 201 }` and `{ 201, 200 }` both default to `200`; set `status: 201` to get `201`.
@@ -143,7 +143,7 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
 - Method shorthands — `api.get`, `api.post`, `api.put`, `api.patch`, `api.delete`/`api.del` with full type inference, mirroring Hono idioms; `method` typed as `Method` with case-insensitive handling via `normalizeMethod` (`GET`/`get`/`Get` all work, `import { normalizeMethod } from "peta-hono"`)
 - Header lowercasing — header param names are lowercased in spec and runtime to match Hono's Fetch-Header behavior; declare header schemas with lowercase keys
 - OpenAPI `operationId` / `deprecated` / tags / summary / description for doc grouping and SDK generation
-- `docs()` options-object form — `docs({ specPath, uiPath })` alongside positional args
+- `docs()` options-object form — `docs({ specPath, uiPath, auth })` alongside positional args; `docs({ auth })` guards the spec + UI with a middleware or registered auth name
 - 204 No Content support — handler returns `null`
 - Auto-generated OpenAPI 3.0 spec at `/openapi.json`
 - Scalar API reference UI at `/docs`
@@ -209,20 +209,21 @@ serve(app)
 
 **`docs()` mount order:** `docs()` doesn't strictly need to be the last call — the OpenAPI spec builds **lazily** on the `/openapi.json` request, not at `docs()` call time. What matters for correctness is **route registration order** (Hono matches in registration order), so import your route files before you call `docs()` for clarity. The `setup.ts` singleton (`createApi()` once, export `{ api, auth, docs, app }`) is the protectable pattern for multi-file apps.
 
-**Protecting docs (auth-guarded recipe):** Default `docs()` is unauthenticated (`ponytail: no auth on docs — protect it in production if needed`). For private APIs, guard the spec and UI with auth middleware *before* mounting:
+**Protecting docs (auth-guarded recipe):** Default `docs()` is unauthenticated (`ponytail: no auth on docs — protect it in production if needed`). For private APIs, opt in with the `docs({ auth })` shorthand — pass a raw Hono `MiddlewareHandler` or a registered auth name (the same names `api({ auth })` accepts). It guards both the spec and UI routes and is registered before mounting (Hono matches in registration order, so the guard must come first — an unregistered auth name throws):
 
 ```ts
-// examples/blog/index.ts — auth-guarded variant
+// examples/blog/index.ts — auth-guarded variant via the shorthand
 import './posts.js'
 import './comments.js'
 import { docs, app } from './setup.js'
 import { authMiddleware } from './auth.js'
 
-app.use('/openapi.json', authMiddleware)
-app.use('/docs/*', authMiddleware)
-docs() // now requires auth
+docs({ auth: authMiddleware }) // now requires auth
+// or by registered name: docs({ auth: 'session' })
 serve(app)
 ```
+
+The manual recipe (`app.use('/openapi.json', authMiddleware)` + `app.use('/docs/*', authMiddleware)` before `docs()`) still works and is equivalent.
 
 Run with:
 

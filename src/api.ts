@@ -418,21 +418,59 @@ export function createApi<Auth = undefined, E extends Env = Env>(
   apiWithHelpers.del = makeMethodHelper("DELETE");
   apiWithHelpers.delete = apiWithHelpers.del;
 
-  function docs(specPath?: string, uiPath?: string): void;
-  function docs(options: { specPath?: string; uiPath?: string }): void;
-  function docs(
-    specPathOrOpts: string | { specPath?: string; uiPath?: string } = "/openapi.json",
-    uiPath = "/docs",
-  ) {
+  /**
+   * Resolve the `docs({ auth })` guard to a concrete middleware. A function is
+   * used as-is (raw Hono middleware); a string is looked up against the
+   * registered auths (the same names `api({ auth })` accepts). An unknown name
+   * throws — mirroring `api()` so an unregistered guard fails fast rather than
+   * silently leaving docs open. `auths` stores the wrapped middleware, so a
+   * string guard rejects via the same throw-to-onError path as route auth.
+   */
+  function resolveDocsGuard(auth: MiddlewareHandler | string): MiddlewareHandler {
+    if (typeof auth === "function") return auth;
+    const mw = auths.get(auth);
+    if (!mw) {
+      throw new Error(
+        `docs(): auth '${auth}' is not registered. Call auth('${auth}', middleware) before using it.`,
+      );
+    }
+    return mw;
+  }
+
+  // Resolve auth → middleware for docs (or undefined if not guarding). `DocsOptions`
+  // is the options-object form; `auth` (optional) gates the spec + UI routes.
+  type DocsOptions = {
+    specPath?: string;
+    uiPath?: string;
+    /** Guard the docs routes. A raw Hono middleware, or a registered auth name. */
+    auth?: MiddlewareHandler | string;
+  };
+
+  const docsImpl = (specPathOrOpts: string | DocsOptions = "/openapi.json", uiPath = "/docs") => {
     let specPath: string;
     let resolvedUiPath: string;
+    let guard: MiddlewareHandler | undefined;
     if (typeof specPathOrOpts === "object" && specPathOrOpts !== null) {
       specPath = specPathOrOpts.specPath ?? "/openapi.json";
       resolvedUiPath = specPathOrOpts.uiPath ?? "/docs";
+      if (specPathOrOpts.auth !== undefined) {
+        guard = resolveDocsGuard(specPathOrOpts.auth);
+      }
     } else {
       specPath = specPathOrOpts as string;
       resolvedUiPath = uiPath;
     }
+
+    // Auth-guarded docs: register the guard BEFORE mounting so Hono runs the
+    // middleware first (`app.use` after `app.get` does NOT guard — Hono matches
+    // in registration order, so a use() registered after a route runs after it).
+    // The spec is an exact path; the UI is guarded with a glob (`/docs/*`) so
+    // both the base page and any Scalar sub-path are covered.
+    if (guard !== undefined) {
+      app.use(specPath, guard);
+      app.use(`${resolvedUiPath}/*`, guard);
+    }
+
     app.doc(specPath, {
       openapi: "3.0.0",
       info: {
@@ -443,6 +481,12 @@ export function createApi<Auth = undefined, E extends Env = Env>(
       },
     });
     app.get(resolvedUiPath, apiReference({ spec: { url: specPath } }));
+  };
+
+  function docs(specPath?: string, uiPath?: string): void;
+  function docs(options: DocsOptions): void;
+  function docs(specPathOrOpts: string | DocsOptions = "/openapi.json", uiPath = "/docs"): void {
+    docsImpl(specPathOrOpts, uiPath);
   }
 
   return { app, api: apiWithHelpers, auth: authWithStrategies, docs };

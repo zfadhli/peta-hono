@@ -101,7 +101,8 @@ api.get(
 // --- Mount OpenAPI docs ----------------------------------------------------
 
 // ponytail: no auth on docs — protect it in production if needed.
-// docs() now accepts either positional args or an options object.
+// Ceiling closed: guard docs with `docs({ auth })` (a middleware or a registered
+// auth name) instead of hand-writing app.use(). See README "Protecting docs".
 docs({ specPath: "/openapi.json", uiPath: "/docs" });
 
 export default app;

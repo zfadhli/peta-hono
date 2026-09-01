@@ -15,10 +15,12 @@
  *  10. hide400 opt-out suppresses the auto 400 on :param routes (issue #05)
  *  11. Success status resolves to the LOWEST 2xx/3xx (issue #08)
  *  12. Default info.version is 0.0.0 (issue #12)
+ *  13. docs({ auth }) shorthand gates spec + UI (opt-in auth guard, default stays open)
  */
 import { scope, type } from "arktype";
+import type { MiddlewareHandler } from "hono";
 import { describe, expect, it } from "vitest";
-import { createApi } from "./api.js";
+import { createApi, fail } from "./api.js";
 import { OpenAPIHono } from "./openapi.js";
 
 const app = new OpenAPIHono();
@@ -424,5 +426,83 @@ describe("OpenAPIHono", () => {
     const spec: any = await res.json();
     expect(spec.info?.version).toBe("0.0.0");
     expect(spec.info?.title).toBe("no-version");
+  });
+});
+
+describe("docs({ auth }) shorthand", () => {
+  // A raw Hono middleware guard — the auth-guarded recipe (app.use before
+  // mounting) without hand-writing the app.use calls. Both /openapi.json and
+  // /docs are gated; authorized requests still get the spec / UI.
+  it("guards the spec + UI with a raw middleware, non-breaking default", async () => {
+    const { api, app, docs } = createApi<undefined>({ title: "guarded docs" });
+    api({ method: "GET", path: "/hello/:name" }, async ({ name }) => ({ msg: `hi ${name}` }));
+
+    const guard: MiddlewareHandler = async (c, next) => {
+      if (c.req.header("x-auth") !== "ok") return c.json({ error: "Unauthorized" }, 401);
+      await next();
+    };
+    docs({ auth: guard });
+
+    // Unauthorized -> 401 on both routes
+    expect((await app.request("/openapi.json")).status).toBe(401);
+    expect((await app.request("/docs")).status).toBe(401);
+
+    // Authorized -> 200; the spec is served correctly (guard doesn't mangle it)
+    const specRes = await app.request("/openapi.json", { headers: { "x-auth": "ok" } });
+    expect(specRes.status).toBe(200);
+    const spec: any = await specRes.json();
+    expect(spec.paths?.["/hello/{name}"]?.get).toBeTruthy();
+    const uiRes = await app.request("/docs", { headers: { "x-auth": "ok" } });
+    expect(uiRes.status).toBe(200);
+    expect(uiRes.headers.get("content-type") ?? "").toContain("text/html");
+  });
+
+  // docs() with no option stays unauthenticated (the pre-existing default) —
+  // the new option is strictly opt-in, so existing apps are unaffected.
+  it("docs() stays unauthenticated by default", async () => {
+    const { app, docs } = createApi<undefined>({ title: "open docs" });
+    docs();
+    expect((await app.request("/openapi.json")).status).toBe(200);
+    expect((await app.request("/docs")).status).toBe(200);
+  });
+
+  // A registered auth *name* gates docs through the same throw-to-onError path
+  // as route auth (fail.unauthorized -> 401), so `docs({ auth: 'session' })` is
+  // a one-liner for private APIs.
+  it("guards docs by a registered auth name", async () => {
+    const { api, app, auth, docs } = createApi<{ user: { id: string } }>({ title: "named guard" });
+    auth("required", async (c) => {
+      if (c.req.header("x-auth") !== "ok") throw fail.unauthorized();
+      return { user: { id: "alice" } };
+    });
+    api({ method: "GET", path: "/a" }, async () => ({})); // spec non-trivial
+    docs({ auth: "required" });
+
+    expect((await app.request("/openapi.json")).status).toBe(401);
+    expect((await app.request("/docs")).status).toBe(401);
+    expect((await app.request("/openapi.json", { headers: { "x-auth": "ok" } })).status).toBe(200);
+    expect((await app.request("/docs", { headers: { "x-auth": "ok" } })).status).toBe(200);
+  });
+
+  // Combining custom paths with a guard; the glob `/reference/*` covers the
+  // base page just like `/docs/*` covers `/docs`.
+  it("guards custom spec + UI paths", async () => {
+    const { app, docs } = createApi<undefined>({ title: "custom paths" });
+    const guard: MiddlewareHandler = async (c, next) => {
+      if (c.req.header("x-auth") !== "ok") return c.json({ error: "Unauthorized" }, 401);
+      await next();
+    };
+    docs({ specPath: "/openapi.json", uiPath: "/reference", auth: guard });
+
+    expect((await app.request("/openapi.json")).status).toBe(401);
+    expect((await app.request("/reference")).status).toBe(401);
+    expect((await app.request("/reference", { headers: { "x-auth": "ok" } })).status).toBe(200);
+  });
+
+  // An unregistered name fails fast rather than silently leaving docs open —
+  // matching api()'s "auth not registered" guard.
+  it("throws when auth name is not registered", () => {
+    const { docs } = createApi<undefined>({ title: "unknown guard" });
+    expect(() => docs({ auth: "nope" })).toThrow(/not registered/);
   });
 });

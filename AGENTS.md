@@ -82,12 +82,14 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 - Route import order matters for overlapping paths — more specific routes first
 - `docs()` does **not** need to be the last call — the OpenAPI spec builds **lazily** on the `/openapi.json` request, not at `docs()` time. What matters for correctness is **route registration order** (Hono matches in registration order), so import your route files before `docs()` for clarity; the `setup.ts` singleton (`createApi()` once, export `{ api, auth, docs, app }`) is the protectable pattern for multi-file apps.
 - Multi-file route imports must be **side-effect imports** — `import "./posts.js"` in the entry runs top-level `api()` calls to register routes. The library declares `"sideEffects": false` (true for its own `dist/`), so a bundler honoring it may **drop** that import and silently lose routes — comment each import (`// side-effect: registers routes`) and mark your app's route files side-effectful.
-- Default `docs()` is unauthenticated (`ponytail: no auth on docs — protect it in production if needed` in `examples/basic/routes.ts`). For private APIs, guard docs with auth middleware before mounting:
+- Default `docs()` is unauthenticated (`ponytail: no auth on docs — protect it in production if needed` in `examples/basic/routes.ts`). For private APIs, opt in with `docs({ auth })` — a raw Hono `MiddlewareHandler`, or a registered auth name (e.g. `auth('session', ...)` → `docs({ auth: 'session' })`). It applies the guard to both the spec path and the UI path (glob, so `/docs` **and** any Scalar sub-path are covered) and registers it **before** mounting — Hono matches in registration order, so `app.use` after `app.get` would NOT guard. Unauthenticated default is unchanged/non-breaking; an unregistered auth name throws (mirrors `api()`'s guard). The equivalent manual recipe still works:
   ```ts
   // auth-guarded docs — mount only for authenticated users
-  app.use('/docs/*', authMiddleware)
-  app.use('/openapi.json', authMiddleware)
-  docs()
+  docs({ auth: authMiddleware })
+  // or equivalently, by hand:
+  // app.use('/docs/*', authMiddleware)
+  // app.use('/openapi.json', authMiddleware)
+  // docs()
   ```
 - Header schemas must use lowercase keys — Hono's `c.req.header()` lowercases via Fetch `Headers`; `_addObjectParams` emits `name.toLowerCase()` when `in === "header"` so spec and runtime match. Declare `type({ "x-api-key": "string" })` not `"X-Api-Key"` (ponytail: ceiled — `coerceDeep` does not auto-lowercase; strict fail-fast 400 if you use uppercase).
 - `normalizeMethod` is public — `import { normalizeMethod } from "peta-hono"` (re-exported via `src/openapi.ts` from `src/paths.ts` single source, case-insensitive `GET`/`get`/`Get` → `"get"`, throws `Unsupported method` otherwise). `Method`/`HttpMethod` types are also re-exported from the barrel for `method` autocomplete.

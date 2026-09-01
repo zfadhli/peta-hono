@@ -144,6 +144,8 @@ export declare function createApi<Auth = undefined, E extends Env = Env>(opts?: 
         (options: {
             specPath?: string;
             uiPath?: string;
+            /** Guard the docs routes. A raw Hono middleware, or a registered auth name. */
+            auth?: MiddlewareHandler | string;
         }): void;
     };
 };
