@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-29
+
+### Changed
+
+- **Example auth secrets now read from the environment** — `examples/strategies/routes.ts` and `examples/auth/routes.ts` load credential-bearing config (`SESSION_SECRET`, `JWT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_PASSWORD`) from the environment with documented non-secret fallbacks, so a deployed app commits no real value. This is a response to a GitGuardian "Generic Password" alert that was a **false positive** on the intentional demo/test placeholders — a full git-history scan confirmed no real credential was ever committed (no rotation or history scrub required).
+
 ## [0.6.1] - 2026-08-29
 
 ### Added
