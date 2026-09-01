@@ -74,7 +74,7 @@ const jwt = auth.jwt("jwt", {
   algorithms: ["HS256"],
   // Asymmetric / multi-service verification is opt-in via `jwks` — a `URL`
   // resolves a remote JWKS, `{ keys: JWK[] }` a local one. Signing still uses
-  // `keys`/`secret`. See `src/auth.selfcheck.ts` (`jwtAsymmetric`) for a full
+  // `keys`/`secret`. See `src/auth.test.ts` (`JWT asymmetric RS256 + JWKS`) for a full
   // RS256 + local-JWKS round-trip example.
   // jwks: someUrl | { keys: [{ kty, kid, k / n / e, alg }] },
   issuer: "strategies-example",

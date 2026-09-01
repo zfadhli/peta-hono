@@ -164,7 +164,7 @@ examples/
   basic/        — single-file example app
     routes.ts     — route definitions
     index.ts      — server entry point
-    selfcheck.ts  — runnable end-to-end test suite
+    selfcheck.test.ts  — end-to-end test suite (Vitest)
   blog/         — multi-file blog API
     setup.ts      — shared createApi() + auth singleton
     db.ts         — data layer (Drizzle ORM + SQLite)
@@ -172,17 +172,17 @@ examples/
     posts.ts      — post CRUD routes
     comments.ts   — nested comment routes
     index.ts      — server entry
-    selfcheck.ts  — runnable end-to-end test suite
+    selfcheck.test.ts  — end-to-end test suite (Vitest)
     spec.snapshot.json — golden OpenAPI spec for regression detection
   auth/         — peta-auth integration example (register/login/profile/logout)
     routes.ts     — route definitions
     index.ts      — server entry
     types.d.ts    — typed c.var.session augmentation
-    selfcheck.ts  — runnable end-to-end test suite
+    selfcheck.test.ts  — end-to-end test suite (Vitest)
   strategies/   — built-in auth strategies example (session + jwt + google oauth)
     routes.ts     — route definitions
     index.ts      — server entry
-    selfcheck.ts  — runnable end-to-end test suite
+    selfcheck.test.ts  — end-to-end test suite (Vitest)
 dist/           — built output (created by `nub run build`)
 ```
 

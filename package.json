@@ -37,19 +37,21 @@
     "check:dist": "nub run build && STALE=$(git status --porcelain -- dist/) && if [ -n \"$STALE\" ]; then echo 'dist/ is stale — run `nub run build` and commit dist/:' \"$STALE\"; exit 1; fi",
     "prepublishOnly": "nub run check:dist",
     "dev": "nub examples/basic/index.ts",
-    "check": "nub examples/basic/selfcheck.ts",
+    "check": "vitest run examples/basic/selfcheck.test.ts",
     "blog": "nub examples/blog/index.ts",
-    "blog:check": "nub examples/blog/selfcheck.ts",
-    "check:all": "nub src/openapi.selfcheck.ts && nub src/auth.selfcheck.ts && nub src/password.selfcheck.ts && nub examples/basic/selfcheck.ts && nub examples/blog/selfcheck.ts && nub examples/auth/selfcheck.ts && nub examples/strategies/selfcheck.ts",
-    "check:auth": "nub src/auth.selfcheck.ts",
+    "blog:check": "vitest run examples/blog/selfcheck.test.ts",
+    "check:auth": "vitest run src/auth.test.ts",
     "strategies": "nub examples/strategies/index.ts",
-    "strategies:check": "nub examples/strategies/selfcheck.ts",
+    "strategies:check": "vitest run examples/strategies/selfcheck.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/ examples/",
     "lint:fix": "biome check --write --unsafe src/ examples/",
     "format": "biome format src/ examples/",
     "format:fix": "biome format --write src/ examples/",
-    "test": "nub run check:all"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "check:all": "vitest run"
   },
   "peerDependencies": {
     "arktype": "^2.2.1",
@@ -69,9 +71,11 @@
     "@hono/node-server": "^1.13.0",
     "@libsql/client": "^0.14.0",
     "@types/node": "^26.0.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "drizzle-orm": "^0.38.0",
     "peta-auth": "0.3.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "hono",

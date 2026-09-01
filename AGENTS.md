@@ -24,15 +24,15 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 | Lint | `nub run lint` (covers `src/` + `examples/`, snapshot excluded via `biome.json` overrides) |
 | Lint auto-fix | `nub run lint:fix` |
 | Format check | `nub run format` |
-| Example tests | `nub examples/basic/selfcheck.ts` |
-| Blog tests | `nub examples/blog/selfcheck.ts` |
-| Auth tests | `nub examples/auth/selfcheck.ts` |
-| Lib tests | `nub src/openapi.selfcheck.ts` |
-| Strategy tests | `nub src/auth.selfcheck.ts` |
-| Password helper tests | `nub src/password.selfcheck.ts` |
+| Basic example tests | `nub run check` |
+| Blog tests | `nub run blog:check` |
+| Auth integration tests | `nub run check:auth` |
 | Strategies example | `nub examples/strategies/index.ts` |
-| Strategies tests | `nub examples/strategies/selfcheck.ts` |
-| All tests | `nub run check:all` (`lib + auth-strategies + password + basic + blog + auth + strategies`) |
+| Strategies tests | `nub run strategies:check` |
+| Test once (full suite) | `nub run check:all` (= `nub run test` = `vitest run`) |
+| Test watch mode | `nub run test:watch` |
+| Test with coverage | `nub run test:coverage` |
+| All tests | `nub run check:all` (`src` openapi/auth/password + basic + blog + auth + strategies) |
 
 ## Structure
 
@@ -42,15 +42,15 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 - `src/index.ts` — public barrel (re-exports all public API)
 - `src/auth/` — built-in auth strategies (session / jwt / oauth): crypto, store, cookie, session, jwt, oauth
 - `src/password.ts` — opt-in `peta-hono/password` scrypt hash/verify helper (separate subpath, keeps the core barrel dependency-light)
-- `src/openapi.selfcheck.ts` — runnable lib integration test (12 assertions)
-- `src/auth.selfcheck.ts` — runnable built-in auth strategy test (session / jwt / oauth / scheme emission / coexistence)
-- `src/password.selfcheck.ts` — runnable `peta-hono/password` hash/verify test
+- `src/openapi.test.ts` — lib integration tests (OpenAPIHono + validator)
+- `src/auth.test.ts` — built-in auth strategy tests (session / jwt / oauth / scheme emission / coexistence)
+- `src/password.test.ts` — `peta-hono/password` hash/verify tests
 - `src/typecheck.selfcheck.ts` — type-only regression guard (tsc --noEmit; excluded from dist/ build)
-- `examples/basic/` — single-file example app (routes.ts + index.ts + selfcheck.ts; hello, things, search, legacy)
-- `examples/blog/` — multi-file blog API (setup.ts singleton, db.ts + schema.ts, posts.ts + comments.ts, index.ts + selfcheck.ts)
+- `examples/basic/` — single-file example app (routes.ts + index.ts + selfcheck.test.ts; hello, things, search, legacy)
+- `examples/blog/` — multi-file blog API (setup.ts singleton, db.ts + schema.ts, posts.ts + comments.ts, index.ts + selfcheck.test.ts)
 - `examples/blog/spec.snapshot.json` — golden OpenAPI spec for regression detection
-- `examples/auth/` — peta-auth integration example (routes.ts + index.ts + types.d.ts + selfcheck.ts)
-- `examples/strategies/` — built-in auth strategies example (session + jwt + google oauth; routes.ts + index.ts + selfcheck.ts)
+- `examples/auth/` — peta-auth integration example (routes.ts + index.ts + types.d.ts + selfcheck.test.ts)
+- `examples/strategies/` — built-in auth strategies example (session + jwt + google oauth; routes.ts + index.ts + selfcheck.test.ts)
 
 ## Conventions
 
@@ -58,7 +58,7 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 - ESM modules (`"type": "module"` in package.json)
 - Import paths use `.js` extensions (Nub resolves to `.ts`)
 - `ponytail:` comments mark deliberate simplifications with ceiling/upgrade path
-- No test framework — selfcheck.ts files are runnable integration tests
+- Tests use **Vitest** — `*.test.ts` under `src/` and `examples/`, with explicit `import { describe, it, expect } from "vitest"` (no globals, no config churn). The former runnable `*.selfcheck.ts` files (hand-rolled assert counters) were migrated to `*.test.ts`; real `expect()` assertions remove the hardcoded-count bookkeeping. `vitest.config.ts` drives include/environment/timeout.
 - TypeScript strict mode, noUncheckedIndexedAccess
 - Lint/format via Biome covers `src/` + `examples/` (lefthook pre-commit + `biome.json` overrides exclude `examples/blog/spec.snapshot.json` which is a generated golden file)
 - TypeScript module resolution: `tsconfig.json` uses `bundler` for `nub file.ts` dev (Nub resolves `.js` → `.ts`); `tsconfig.build.json` uses `NodeNext` for `dist/` build (preserves `.js` ESM imports for published artifact). Both target `ESNext`/`ES2022` with `strict` + `noUncheckedIndexedAccess`.
@@ -91,4 +91,4 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
   ```
 - Header schemas must use lowercase keys — Hono's `c.req.header()` lowercases via Fetch `Headers`; `_addObjectParams` emits `name.toLowerCase()` when `in === "header"` so spec and runtime match. Declare `type({ "x-api-key": "string" })` not `"X-Api-Key"` (ponytail: ceiled — `coerceDeep` does not auto-lowercase; strict fail-fast 400 if you use uppercase).
 - `normalizeMethod` is public — `import { normalizeMethod } from "peta-hono"` (re-exported via `src/openapi.ts` from `src/paths.ts` single source, case-insensitive `GET`/`get`/`Get` → `"get"`, throws `Unsupported method` otherwise). `Method`/`HttpMethod` types are also re-exported from the barrel for `method` autocomplete.
-- To update the blog spec snapshot: `rm examples/blog/spec.snapshot.json && nub examples/blog/selfcheck.ts`
+- To update the blog spec snapshot: `rm examples/blog/spec.snapshot.json && nub run test` (or `nub run check:all`) — the `openapi spec snapshot matches` test regenerates the file; `git status` surfaces the diff for review before committing.
