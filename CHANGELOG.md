@@ -5,11 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.3] - 2026-09-01
 
 ### Added
 
 - **`docs({ auth })` opt-in docs guard** — `docs()` now accepts an optional `auth` (a raw Hono `MiddlewareHandler`, or a registered auth name like `'session'`) to gate both the OpenAPI spec and the Scalar UI route. The guard is registered **before** mounting (the auth-guarded recipe, hand-`app.use` boilerplate removed) and rejects via the same throw-to-onError path as route auth. The unauthenticated default is unchanged (non-breaking); an unregistered auth name throws (mirrors `api()`'s guard).
+- **`generateKey()` for asymmetric JWT + rotation (ADR-013)** — `generateKey({ algorithm?, kid? })` builds a ready-to-wire asymmetric keypair via Web Crypto and returns `{ kid, privateKey, publicJwk }`. The signing `CryptoKey` plugs straight into the JWT strategy's `keys`, and `publicJwk` (stamped with `kid` + `alg`) into `jwks` — so the RS256/EdDSA + JWKS + key-rotation happy path is a few lines instead of hand-wiring `crypto.subtle.generateKey` + `crypto.subtle.exportKey`. Defaults to `"RS256"`; the asymmetric algs (`RS384`/`RS512`/`ES256`/`ES384`/`ES512`/`EdDSA`) are also supported. New exports: `generateKey`, `GeneratedJwtKey`, `GenerateKeyOptions`, `AsymmetricJwtAlgorithm`.
+
+### Changed
+
+- **Error kernel extracted to `src/errors.ts` (ADR-011 step 2)** — `APIError`, `ErrorHandler`, `createErrorHandler`, and the `fail`/`errors`/`httpErrors` helpers moved to a zero-dependency module so the validator can throw `APIError` while both `openapi.ts` and `api.ts`/validation import from the kernel (breaking the `validator → APIError` cycle that previously forced `APIError` to live in `openapi.ts`). Public re-exports are preserved — `import { APIError } from "peta-hono"` is unchanged (non-breaking internal refactor).
+- **Self-checks migrated to Vitest** — the hand-rolled `*.selfcheck.ts` no-framework assertion counters (`src/openapi.selfcheck.ts`, `src/auth.selfcheck.ts`, `src/password.selfcheck.ts`, and the `examples/*/selfcheck.ts`) were replaced with real Vitest `expect()` assertions in `*.test.ts` files (`src/openapi.test.ts`, `src/auth.test.ts`, `src/password.test.ts`, `examples/*/selfcheck.test.ts`), driven by a new `vitest.config.ts`. Removes the hardcoded-count bookkeeping; the suite now runs via `nub run check:all` (`vitest run`).
+- **ArkType → OpenAPI schema derivation is cached (WeakMap)** — the ArkType type → OpenAPI JSON-schema derivation (`_schemaToOA`) is memoized per `Type` object in a module-scoped `WeakMap`, so repeated handler/route declarations over the same schema no longer re-derive it on every spec build, and `$defs` are re-registered into each instance's component map on a hit. Performance only — the emitted spec is identical.
 
 ## [0.6.2] - 2026-08-29
 
