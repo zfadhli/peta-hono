@@ -14,7 +14,7 @@
 | **Coercion** — `coerceDeep`, `coerceValue`, `resolveRef`, `is*Type` | `openapi.ts` private (~120 LOC) | Divergent change: spec + validation change together | `src/validation.ts` | Validation owns coercion; spec only borrows `JsonSchema` shape. |
 | **Validation** — `arktypeValidator(target,schema)` | `openapi.ts` | Same | `src/validation.ts` | Throws `APIError(400)` — depends on `errors.ts` kernel, not `openapi.ts`. |
 | **Registry & Hoisting** — `ComponentRegistry`, `sha1Hex`, `rewriteRefs`, `_schemaToOA`, `_getErrorSchemaRef` | `openapi.ts` private | Spec + hash + crypto mixed into routing class | `src/registry.ts` | Pure functions `(schema, registry) => JsonSchema`; async hash isolated. |
-| **Error Kernel** — `APIError`, `ErrorHandler`, `createErrorHandler`, `fail` | `APIError`+`createErrorHandler` in `openapi.ts`, `fail` in `api.ts` | Cycle risk (`validator → APIError`) | `src/errors.ts` | Kernel, no deps on Hono/ArkType. Both `validation` and `openapi` import. Solves circular `api ↔ openapi`. |
+| **Error Kernel** — `APIError`, `ErrorHandler`, `createErrorHandler`, `fail` | `APIError`, `ErrorHandler`, `createErrorHandler`, `fail`/`errors`/`httpErrors` in `src/errors.ts` | Cycle risk (`validator → APIError`) — solved: validator imports `APIError` from `errors.ts` | `src/errors.ts` — **implemented 2026-09-01, ADR-011 step 2** | Kernel, no deps on Hono/ArkType. Both `validation` and `openapi` import. Solves circular `api ↔ openapi`. |
 | **OpenAPI Emission** — `OpenAPIHono`, `_routes`, `_buildSpec`, `_buildResponses`, `_addObjectParams`, `doc()` | `openapi.ts` class | God class (routing + spec + registry + errors) | `src/openapi.ts` (orchestrator, <300 LOC after extraction) | Injects `paths`, `validation`, `registry`, `errors`. Owns only Hono dispatch + `StoredRoute[]`. |
 | **DSL Facade** — `createApi`, `api()` overloads, `api.get()` shorthands (`ApiMethodHelper`), `auth()` wrap, `docs()`, `ReqFor`, `ParamsFromPath`, `RouteFields` | `src/api.ts` | Leaked `ReturnType` shorthand collapsed overloads (grilling 02) | `src/api.ts` (facade) — **fixed 2026-08-26: `ApiMethodHelper<Auth,E>` explicit two-overload interface** | Depends on `paths` + `openapi` + `errors` + `validation` types only. No `coerce*` or `sha1Hex`. |
 
@@ -37,7 +37,7 @@
 - [x] Header lowercasing user-facing doc — README `How it works` + `Features` + AGENTS `Key patterns` now state lowercase keys; glossary `Coercion`/`Ponytail` amended (see 2026-08-26 patch).
 - [x] Fix shorthand overload collapse — `ApiMethodHelper<Auth,E>` replaces `ReturnType<typeof makeMethodHelper>` (ADR-009, grilling 02) — negative `api.get` with `auth` on `createApi<undefined>` now errors, matching classic `api()`.
 - [x] Clarify 400 auto-doc on param routes — `_buildResponses` `hasParamTokens` intentionally documents `400` for `GET /:id` (b6354f3); `src/openapi.ts` comment + ADR-007 now state `OR path has :param` and `Guard if(!responses["400"])` respects explicit `responses:{400}`. **2046-08-27 (issue #05): `hide400` opt-out added** so a pure `:param` route can suppress the auto 400 entirely.
-- [ ] Extract `src/errors.ts` — move `APIError`+`createErrorHandler`+`fail` there; re-export from `openapi.ts`/`api.ts` for barrel stability.
+- [x] Extract `src/errors.ts` — move `APIError`+`createErrorHandler`+`fail` there; re-export from `openapi.ts`/`api.ts` for barrel stability. (ADR-011 step 2, 2026-09-01)
 - [ ] Extract `src/validation.ts` — after `errors.ts` exists (breaks cycle).
 - [ ] Defer `src/registry.ts` split until `openapi.ts` >800 LOC or second divergent change (ADR-011 — Proposed, not now).
 
@@ -123,7 +123,7 @@ export function parseParamTokens(path: string): ParamToken[]; // matchAll(PARAM_
 export function normalizeMethod(m: string): string; // lower, validate
 export function toOapiPath(path: string): string;   // :x→{x}, *→{wildcard}
 
-// src/errors.ts — kernel, no deps (PROPOSED — not yet extracted; currently in openapi.ts + api.ts)
+// src/errors.ts — kernel, no deps (IMPLEMENTED — ADR-011 step 2; extracted from openapi.ts + api.ts)
 export class APIError extends Error { constructor(public status: ContentfulStatusCode, msg: string) }
 export type ErrorHandler = (err: Error, c: Context) => Response | Promise<Response>;
 export function createErrorHandler(debug?: boolean): ErrorHandler;

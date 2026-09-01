@@ -1,36 +1,13 @@
 import { apiReference } from "@scalar/hono-api-reference";
 import { type } from "arktype";
 import { buildAuthStrategy, buildJwtStrategy, buildOAuthStrategy, buildSessionStrategy, } from "./auth/index.js";
-import { APIError, createErrorHandler, OpenAPIHono, } from "./openapi.js";
+import { createErrorHandler } from "./errors.js";
+import { OpenAPIHono } from "./openapi.js";
 import { normalizeMethod, parseParamTokens } from "./paths.js";
-// Re-export APIError (defined in openapi.ts) so the public barrel keeps a
-// stable shape via api.ts. See issue #4: APIError moved to openapi.ts so the
-// validator can throw it without a circular import.
-export { APIError };
-// --- Named error helpers per HTTP status ---
-export const fail = {
-    badRequest: (msg = "Bad Request") => new APIError(400, msg),
-    unauthorized: (msg = "Unauthorized") => new APIError(401, msg),
-    forbidden: (msg = "Forbidden") => new APIError(403, msg),
-    notFound: (msg = "Not Found") => new APIError(404, msg),
-    conflict: (msg = "Conflict") => new APIError(409, msg),
-    unprocessableEntity: (msg = "Unprocessable Entity") => new APIError(422, msg),
-    tooManyRequests: (msg = "Too Many Requests") => new APIError(429, msg),
-    internalServerError: (msg = "Internal Server Error") => new APIError(500, msg),
-    badGateway: (msg = "Bad Gateway") => new APIError(502, msg),
-    serviceUnavailable: (msg = "Service Unavailable") => new APIError(503, msg),
-    gatewayTimeout: (msg = "Gateway Timeout") => new APIError(504, msg),
-};
-/**
- * @deprecated Use `fail` instead — `errors` is a pure synonym kept for callers
- * who prefer the noun form. The single canonical helper is `fail`.
- */
-export const errors = fail;
-/**
- * @deprecated Use `fail` instead — `httpErrors` is a pure synonym kept for
- * backward compatibility. The single canonical helper is `fail`.
- */
-export const httpErrors = fail;
+// Error kernel moved to src/errors.ts (ADR-011 step 2). Re-export APIError +
+// the named helpers so the public barrel (src/index.ts) keeps a stable shape
+// via api.ts, and the validator can throw APIError without a circular import.
+export { APIError, errors, fail, httpErrors } from "./errors.js";
 // --- Create the API builder ---
 /**
  * Create an Encore-style API builder on top of Hono + OpenAPI.

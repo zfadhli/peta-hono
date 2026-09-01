@@ -1,4 +1,4 @@
-import { APIError } from "../openapi.js";
+import { APIError } from "../errors.js";
 import { cookieNameFor, expiredCookie, parseCookies, serializeCookie, } from "./cookie.js";
 import { base64urlUtf8, hmacSign, hmacVerify, randomToken, sha256Base64url, utf8FromBase64url, } from "./crypto.js";
 const GOOGLE_AUTHORIZE = "https://accounts.google.com/o/oauth2/v2/auth";

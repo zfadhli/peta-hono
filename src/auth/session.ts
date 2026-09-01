@@ -1,5 +1,6 @@
 import type { Context } from "hono";
-import { APIError, type SecurityScheme } from "../openapi.js";
+import { APIError } from "../errors.js";
+import type { SecurityScheme } from "../openapi.js";
 import {
   type CookieSerializeOptions,
   cookieNameFor,

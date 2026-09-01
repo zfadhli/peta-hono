@@ -1,6 +1,7 @@
 import { ArkErrors, type } from "arktype";
 import { Hono } from "hono";
 import { validator } from "hono/validator";
+import { APIError, createErrorHandler } from "./errors.js";
 import { hasParamTokens, normalizeMethod, parseParamTokens, toOapiPath } from "./paths.js";
 // --- Web Crypto helpers ---
 /** SHA-1 hex digest (first 12 chars) using Web Crypto API — no Node dependency. */
@@ -10,48 +11,6 @@ async function sha1Hex(data) {
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("");
     return hex.slice(0, 12);
-}
-export function createErrorHandler(debug) {
-    return (err, c) => {
-        if (err instanceof APIError) {
-            return c.json({ error: err.message }, err.status);
-        }
-        // ponytail: logs the full error server-side, sends generic message to client.
-        console.error(err);
-        const nodeEnv = typeof process !== "undefined"
-            ? process.env?.NODE_ENV
-            : undefined;
-        // Debug is DEV-ONLY. Reveal details only under an explicit development (or
-        // test) signal. In a production deploy where NODE_ENV is absent — Bun/Deno/
-        // edge runtimes, or a Node process that forgets to set it — the safe default
-        // is to WITHHOLD details rather than leak them (the old gate inverted this:
-        // `isProd = NODE_ENV==="production"` leaked when NODE_ENV was unset).
-        const effectiveDebug = !!debug && (nodeEnv === "development" || nodeEnv === "test");
-        if (effectiveDebug) {
-            const message = err instanceof Error ? err.message : String(err);
-            const body = { error: message };
-            if (err instanceof Error && err.stack)
-                body.stack = err.stack;
-            return c.json(body, 500);
-        }
-        if (debug && nodeEnv === "production") {
-            console.warn("[peta-hono] debug enabled in production — redacting error details");
-        }
-        return c.json({ error: "Internal Server Error" }, 500);
-    };
-}
-// --- Public error class ---
-/**
- * Typed HTTP error. Thrown from handlers (and the validator) to route errors
- * through `app.onError` — the single chokepoint for all error responses.
- */
-export class APIError extends Error {
-    status;
-    constructor(status, message) {
-        super(message);
-        this.status = status;
-        this.name = "APIError";
-    }
 }
 // Path & method grammar lives in src/paths.ts — single source per ADR-010.
 // Re-export for barrel stability: consumers may import { Method, normalizeMethod } from "./openapi.js"

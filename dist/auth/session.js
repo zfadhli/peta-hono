@@ -1,4 +1,4 @@
-import { APIError } from "../openapi.js";
+import { APIError } from "../errors.js";
 import { cookieNameFor, expiredCookie, parseCookies, serializeCookie, } from "./cookie.js";
 import { hmacSign, hmacVerify, randomToken, timingSafeEqual } from "./crypto.js";
 import { createMemorySessionStore } from "./store.js";

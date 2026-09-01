@@ -12,7 +12,8 @@ import {
   type KeyInput,
   SignJWT,
 } from "jose";
-import { APIError, type SecurityScheme } from "../openapi.js";
+import { APIError } from "../errors.js";
+import type { SecurityScheme } from "../openapi.js";
 import { createCookieTransport } from "./cookie.js";
 import { randomToken, sha256Hex } from "./crypto.js";
 import { createMemoryRefreshTokenStore, type RefreshTokenStore } from "./store.js";

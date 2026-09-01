@@ -1,8 +1,7 @@
 import { type Type } from "arktype";
-import type { Context, Env, MiddlewareHandler } from "hono";
+import type { Env, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { Schema } from "hono/types";
-import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Method } from "./paths.js";
 /** Any ArkType type instance — has toJsonSchema() and is callable for validation. */
 export type ArkType = Type<any, any>;
@@ -70,19 +69,8 @@ export interface RouteConfig {
     /** Suppress the auto-documented 400 that path `:param` routes get (noise). */
     hide400?: boolean;
 }
-/** Single error policy — shared by OpenAPIHono and createApi (via createErrorHandler). */
-export type ErrorHandler = (err: Error, c: Context) => Response | Promise<Response>;
-export declare function createErrorHandler(debug?: boolean): ErrorHandler;
 /** Handler signature: receives flat request object, returns JSON-serializable object or null (→ 204). */
 type RouteHandler = (req: Record<string, unknown>) => Record<string, unknown> | null | Promise<Record<string, unknown> | null>;
-/**
- * Typed HTTP error. Thrown from handlers (and the validator) to route errors
- * through `app.onError` — the single chokepoint for all error responses.
- */
-export declare class APIError extends Error {
-    status: ContentfulStatusCode;
-    constructor(status: ContentfulStatusCode, message: string);
-}
 export type { HttpMethod, Method, ParamToken } from "./paths.js";
 export { hasParamTokens, normalizeMethod, PARAM_HAS_RE, PARAM_TOKEN_RE, parseParamTokens, SUPPORTED_METHODS, toOapiPath, } from "./paths.js";
 /**

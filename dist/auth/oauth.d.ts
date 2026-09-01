@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { type SecurityScheme } from "../openapi.js";
+import type { SecurityScheme } from "../openapi.js";
 /**
  * Built-in Google OAuth2 authorization-code strategy (+ optional PKCE).
  *

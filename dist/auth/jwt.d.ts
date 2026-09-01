@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { type CryptoKey, type JWK } from "jose";
-import { type SecurityScheme } from "../openapi.js";
+import type { SecurityScheme } from "../openapi.js";
 import { type RefreshTokenStore } from "./store.js";
 /**
  * Built-in JWT access-token + refresh-token rotation strategy.

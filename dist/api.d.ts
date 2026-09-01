@@ -1,58 +1,11 @@
 import { type Type } from "arktype";
 import type { Context, Env, MiddlewareHandler } from "hono";
 import { type AuthStrategySpec, type JwtStrategy, type JwtStrategyOptions, type OAuthStrategy, type OAuthStrategyOptions, type SessionStrategy, type SessionStrategyOptions, type StrategyFor } from "./auth/index.js";
-import { APIError, type AuthScheme, OpenAPIHono, type SecurityScheme } from "./openapi.js";
+import { type AuthScheme, OpenAPIHono, type SecurityScheme } from "./openapi.js";
 import { type Method } from "./paths.js";
+export { APIError, errors, fail, httpErrors } from "./errors.js";
 export type { HttpMethod, Method } from "./paths.js";
 export type { AuthScheme, SecurityScheme };
-export { APIError };
-export declare const fail: {
-    badRequest: (msg?: string) => APIError;
-    unauthorized: (msg?: string) => APIError;
-    forbidden: (msg?: string) => APIError;
-    notFound: (msg?: string) => APIError;
-    conflict: (msg?: string) => APIError;
-    unprocessableEntity: (msg?: string) => APIError;
-    tooManyRequests: (msg?: string) => APIError;
-    internalServerError: (msg?: string) => APIError;
-    badGateway: (msg?: string) => APIError;
-    serviceUnavailable: (msg?: string) => APIError;
-    gatewayTimeout: (msg?: string) => APIError;
-};
-/**
- * @deprecated Use `fail` instead — `errors` is a pure synonym kept for callers
- * who prefer the noun form. The single canonical helper is `fail`.
- */
-export declare const errors: {
-    badRequest: (msg?: string) => APIError;
-    unauthorized: (msg?: string) => APIError;
-    forbidden: (msg?: string) => APIError;
-    notFound: (msg?: string) => APIError;
-    conflict: (msg?: string) => APIError;
-    unprocessableEntity: (msg?: string) => APIError;
-    tooManyRequests: (msg?: string) => APIError;
-    internalServerError: (msg?: string) => APIError;
-    badGateway: (msg?: string) => APIError;
-    serviceUnavailable: (msg?: string) => APIError;
-    gatewayTimeout: (msg?: string) => APIError;
-};
-/**
- * @deprecated Use `fail` instead — `httpErrors` is a pure synonym kept for
- * backward compatibility. The single canonical helper is `fail`.
- */
-export declare const httpErrors: {
-    badRequest: (msg?: string) => APIError;
-    unauthorized: (msg?: string) => APIError;
-    forbidden: (msg?: string) => APIError;
-    notFound: (msg?: string) => APIError;
-    conflict: (msg?: string) => APIError;
-    unprocessableEntity: (msg?: string) => APIError;
-    tooManyRequests: (msg?: string) => APIError;
-    internalServerError: (msg?: string) => APIError;
-    badGateway: (msg?: string) => APIError;
-    serviceUnavailable: (msg?: string) => APIError;
-    gatewayTimeout: (msg?: string) => APIError;
-};
 type AnyArkType = Type<any, any>;
 /** Extract the inferred output type from an ArkType instance. */
 type ArkInfer<T> = T extends {

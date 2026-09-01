@@ -1,5 +1,5 @@
 import { createLocalJWKSet, createRemoteJWKSet, jwtVerify, SignJWT, } from "jose";
-import { APIError } from "../openapi.js";
+import { APIError } from "../errors.js";
 import { createCookieTransport } from "./cookie.js";
 import { randomToken, sha256Hex } from "./crypto.js";
 import { createMemoryRefreshTokenStore } from "./store.js";
