@@ -1,10 +1,10 @@
-import { type Type } from "arktype";
 import type { Env, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { Schema } from "hono/types";
 import type { Method } from "./paths.js";
-/** Any ArkType type instance — has toJsonSchema() and is callable for validation. */
-export type ArkType = Type<any, any>;
+import { type ArkType } from "./validation.js";
+export { arktypeValidator } from "./validation.js";
+export type { ArkType } from "./validation.js";
 /** OAuth2 authorization-code flow (Google, GitHub, ...). */
 export type OAuth2Flows = {
     authorizationCode: {
@@ -73,12 +73,6 @@ export interface RouteConfig {
 type RouteHandler = (req: Record<string, unknown>) => Record<string, unknown> | null | Promise<Record<string, unknown> | null>;
 export type { HttpMethod, Method, ParamToken } from "./paths.js";
 export { hasParamTokens, normalizeMethod, PARAM_HAS_RE, PARAM_TOKEN_RE, parseParamTokens, SUPPORTED_METHODS, toOapiPath, } from "./paths.js";
-/**
- * Create a Hono validator middleware from an ArkType schema.
- * Coerces strings → numbers/booleans (deep, element-wise for arrays and nested objects)
- * before validation so query/header strings pass typed schemas.
- */
-export declare function arktypeValidator(target: "json" | "query" | "header" | "param", schema: ArkType): MiddlewareHandler;
 export declare class OpenAPIHono<E extends Env = Env, S extends Schema = Schema, BasePath extends string = "/"> extends Hono<E, S, BasePath> {
     private _routes;
     private _components;
