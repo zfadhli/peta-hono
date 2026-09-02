@@ -2,48 +2,14 @@ import { type } from "arktype";
 import { Hono } from "hono";
 import { APIError, createErrorHandler } from "./errors.js";
 import { hasParamTokens, normalizeMethod, parseParamTokens, toOapiPath } from "./paths.js";
+import { getErrorSchemaRef, schemaToOA } from "./registry.js";
 import { arktypeValidator, isObjectSchema } from "./validation.js";
 // Validator re-export (ADR-011 step 3) — barrel stability for deep imports of
 // `arktypeValidator` via openapi.ts; the public barrel imports it from index.ts.
 export { arktypeValidator } from "./validation.js";
-// --- Web Crypto helpers ---
-/** SHA-1 hex digest (first 12 chars) using Web Crypto API — no Node dependency. */
-async function sha1Hex(data) {
-    const buf = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(data));
-    const hex = Array.from(new Uint8Array(buf))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
-    return hex.slice(0, 12);
-}
 // Path & method grammar lives in src/paths.ts — single source per ADR-010.
 // Re-export for barrel stability: consumers may import { Method, normalizeMethod } from "./openapi.js"
 export { hasParamTokens, normalizeMethod, PARAM_HAS_RE, PARAM_TOKEN_RE, parseParamTokens, SUPPORTED_METHODS, toOapiPath, } from "./paths.js";
-/** Cache of ArkType Type → processed OpenAPI Schema, keyed by Type object identity. */
-const schemaCache = new WeakMap();
-/**
- * Recursively rewrite all $ref: "#/$defs/X" → "#/components/schemas/<stableName>" in-place.
- * Used during _schemaToOA to fix dangling refs after hoisting $defs to components.
- */
-function rewriteRefs(node, rename) {
-    if (typeof node !== "object" || node === null)
-        return;
-    if (Array.isArray(node)) {
-        for (const item of node)
-            rewriteRefs(item, rename);
-        return;
-    }
-    const obj = node;
-    const ref = obj.$ref;
-    if (typeof ref === "string") {
-        const m = ref.match(/^#\/\$defs\/(.+)$/);
-        if (m && rename.has(m[1])) {
-            obj.$ref = `#/components/schemas/${rename.get(m[1])}`;
-        }
-    }
-    for (const key of Object.keys(obj)) {
-        rewriteRefs(obj[key], rename);
-    }
-}
 // --- OpenAPIHono ---
 export class OpenAPIHono extends Hono {
     _routes = [];
@@ -321,80 +287,18 @@ export class OpenAPIHono extends Hono {
         }
         return responses;
     }
-    _errorSchemaRef = null;
+    // Framework-error schema ref is memoized per-instance registry in registry.ts
+    // (ADR-011 step 4).
     async _getErrorSchemaRef() {
-        if (this._errorSchemaRef)
-            return this._errorSchemaRef;
-        const errorSchema = type({ error: "string" });
-        const json = errorSchema.toJsonSchema();
-        delete json.$schema;
-        const hash = await sha1Hex(JSON.stringify(json));
-        const name = `schema_${hash}`;
-        if (!this._components.schemas.has(name)) {
-            this._components.schemas.set(name, json);
-        }
-        this._errorSchemaRef = { $ref: `#/components/schemas/${name}` };
-        return this._errorSchemaRef;
+        return getErrorSchemaRef(this._components);
     }
     /**
-     * Convert an ArkType schema → OpenAPI Schema Object.
-     * Uses ArkType's toJsonSchema(), strips $schema, hoists $defs to components/schemas
-     * with content-hash stable names, and rewrites all $ref pointers accordingly.
+     * Convert an ArkType schema → OpenAPI Schema Object (delegates to registry.ts,
+     * ADR-011 step 4): strips $schema, hoists $defs to components/schemas under
+     * content-hash stable names, rewrites all $ref pointers, module-scoped cache.
      */
     async _schemaToOA(schema) {
-        // Cache hit — reuse the fully-processed schema. It is byte-identical to a fresh
-        // derivation (no $schema, $defs hoisted, refs rewritten) and immutable after
-        // derivation, so sharing the object across routes/instances is safe (callers
-        // only read it). Re-register the hoisted $defs so THIS instance's per-instance
-        // component map resolves every ref — `schemaCache` is module-scoped, but
-        // `_components` is per-instance.
-        const cached = schemaCache.get(schema);
-        if (cached) {
-            for (const [stableName, def] of cached.defs) {
-                if (!this._components.schemas.has(stableName)) {
-                    this._components.schemas.set(stableName, def);
-                }
-            }
-            return cached.schema;
-        }
-        const json = schema.toJsonSchema();
-        // Remove JSON Schema draft meta-schema (not valid in OpenAPI 3.0)
-        delete json.$schema;
-        if (!json.$defs) {
-            schemaCache.set(schema, { schema: json, defs: [] });
-            return json;
-        }
-        // Build stable names: originalName → schema_<sha1(normalizedContent).slice(0,12)>
-        // ArkType's auto-generated def names (e.g. "intersection216") are counter-based
-        // and unstable across runs. Since those names also appear inside $ref strings
-        // in the def content, we normalize refs to positional indices before hashing
-        // so the hash depends only on structure, not generated names.
-        const defEntries = Object.entries(json.$defs);
-        const nameToIndex = new Map();
-        for (let i = 0; i < defEntries.length; i++) {
-            nameToIndex.set(defEntries[i][0], String(i));
-        }
-        const normalizeRefs = (s) => s.replace(/#\/\$defs\/([^"]+)/g, (_, name) => `#/$defs/${nameToIndex.get(name) ?? name}`);
-        const rename = new Map();
-        for (const [name, def] of defEntries) {
-            const hash = await sha1Hex(normalizeRefs(JSON.stringify(def)));
-            rename.set(name, `schema_${hash}`);
-        }
-        // Rewrite all $ref pointers in-place (main body + nested defs)
-        rewriteRefs(json, rename);
-        // Hoist $defs to components/schemas under stable names, capturing the entries so
-        // a later cache hit can re-register them into another instance's component map.
-        const defs = [];
-        for (const [name, def] of Object.entries(json.$defs)) {
-            const stableName = rename.get(name);
-            defs.push([stableName, def]);
-            if (!this._components.schemas.has(stableName)) {
-                this._components.schemas.set(stableName, def);
-            }
-        }
-        delete json.$defs;
-        schemaCache.set(schema, { schema: json, defs });
-        return json;
+        return schemaToOA(schema, this._components);
     }
     /** Walk an ArkType object schema and produce OpenAPI parameter objects. */
     async _addObjectParams(params, schema, inLocation) {

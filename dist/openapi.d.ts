@@ -91,12 +91,11 @@ export declare class OpenAPIHono<E extends Env = Env, S extends Schema = Schema,
     registerSecurityScheme(name: string, scheme: SecurityScheme): void;
     private _buildSpec;
     private _buildResponses;
-    private _errorSchemaRef;
     private _getErrorSchemaRef;
     /**
-     * Convert an ArkType schema → OpenAPI Schema Object.
-     * Uses ArkType's toJsonSchema(), strips $schema, hoists $defs to components/schemas
-     * with content-hash stable names, and rewrites all $ref pointers accordingly.
+     * Convert an ArkType schema → OpenAPI Schema Object (delegates to registry.ts,
+     * ADR-011 step 4): strips $schema, hoists $defs to components/schemas under
+     * content-hash stable names, rewrites all $ref pointers, module-scoped cache.
      */
     private _schemaToOA;
     /** Walk an ArkType object schema and produce OpenAPI parameter objects. */
