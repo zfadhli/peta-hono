@@ -2,7 +2,7 @@ import { apiReference } from "@scalar/hono-api-reference";
 import { type } from "arktype";
 import { buildAuthStrategy, buildJwtStrategy, buildOAuthStrategy, buildSessionStrategy, } from "./auth/index.js";
 import { createErrorHandler } from "./errors.js";
-import { OpenAPIHono } from "./openapi.js";
+import { OpenAPIHono, } from "./openapi.js";
 import { normalizeMethod, parseParamTokens } from "./paths.js";
 // Error kernel moved to src/errors.ts (ADR-011 step 2). Re-export APIError +
 // the named helpers so the public barrel (src/index.ts) keeps a stable shape
@@ -155,6 +155,7 @@ export function createApi(opts = {}) {
             operationId: config.operationId,
             deprecated: config.deprecated,
             hide400: config.hide400,
+            resolve: config.resolve,
         }, (req) => handler(req));
     }
     // --- Method shorthands: api.get(path, config, handler) etc. ---

@@ -1,5 +1,6 @@
 // Route files are imported for side effects — calling api() at the top level
 // registers each route on the shared app from setup.ts.
+import "./auth.js";
 import "./posts.js";
 import "./comments.js";
 
@@ -12,7 +13,12 @@ import { app, docs } from "./setup.js";
 // registration order). Options-object form; positional docs() also works.
 docs({ specPath: "/openapi.json", uiPath: "/docs" });
 
-serve(app, (info) => {
+// Port is configurable via PORT (default 3000). serve() needs the options form
+// ({ fetch, port }) to override the default port; passing the App directly uses
+// @hono/node-server's default of 3000.
+const port = Number(process.env.PORT) || 5000;
+
+serve({ fetch: app.fetch, port }, (info) => {
   console.log(`Blog API → http://localhost:${info.port}`);
   console.log(`Docs (Scalar) → http://localhost:${info.port}/docs`);
   console.log(`OpenAPI spec → http://localhost:${info.port}/openapi.json`);

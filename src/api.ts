@@ -17,7 +17,12 @@ import {
   type StrategyFor,
 } from "./auth/index.js";
 import { createErrorHandler } from "./errors.js";
-import { type AuthScheme, OpenAPIHono, type SecurityScheme } from "./openapi.js";
+import {
+  type AuthScheme,
+  OpenAPIHono,
+  type RouteResolver,
+  type SecurityScheme,
+} from "./openapi.js";
 import { type Method, normalizeMethod, parseParamTokens } from "./paths.js";
 
 // Error kernel moved to src/errors.ts (ADR-011 step 2). Re-export APIError +
@@ -74,6 +79,29 @@ type ReqFor<P extends string, B, Q, H, E extends Env = Env> = ParamsFromPath<P> 
 /** Add `auth: Auth` to req only when Auth is not undefined (no-auth app). */
 type AuthField<Auth> = [Auth] extends [undefined] ? {} : { auth: Auth };
 
+/**
+ * A resource resolver: reads the validated flat request, returns the resource
+ * value to inject under its key, or throws fail.notFound/fail.forbidden.
+ * Contravariant (not bivariant): a named resolver that destructures only a subset
+ * `({ id, auth })` IS assignable because `In` (the full request) is assignable to
+ * that subset argument type — the subset is a wider argument position under
+ * strictFunctionTypes, so the narrow-looking function signature accepts it.
+ */
+type ResolverFn<In> = (input: In) => unknown;
+
+/**
+ * Project a resolver map onto the fields the handler receives: each key's value
+ * is the awaited return type of that resolver. With the default `R = {}` this
+ * collapses to `{}`, so an absent `resolve` leaves the handler type unchanged.
+ */
+type ResolvedFields<R> = {
+  [K in keyof R]: R[K] extends (...args: never[]) => infer O ? Awaited<O> : never;
+};
+
+/** The resolver input: the validated flat request + auth (only when the route is gated). */
+type ResolveInput<P extends string, B, Q, H, Auth, E extends Env> = ReqFor<P, B, Q, H, E> &
+  AuthField<Auth>;
+
 /** Shared config fields for api() overloads — minus the `auth` key. */
 type RouteFields<P extends string, B, Q, H> = {
   method: Method;
@@ -118,20 +146,26 @@ type ApiMethodHelper<Auth, E extends Env> = {
     B extends AnyArkType | undefined,
     Q extends AnyArkType | undefined,
     H extends AnyArkType | undefined,
+    R extends { [K in keyof R]: ResolverFn<ReqFor<P, B, Q, H, E>> } = {},
   >(
     path: P,
-    config: RouteFieldsWithoutMethodPath<P, B, Q, H> & { auth?: undefined },
-    handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any,
+    config: RouteFieldsWithoutMethodPath<P, B, Q, H> & { auth?: undefined; resolve?: R },
+    handler: (req: ReqFor<P, B, Q, H, E> & ResolvedFields<R>) => Promise<any> | any,
   ): void;
   <
     P extends string,
     B extends AnyArkType | undefined,
     Q extends AnyArkType | undefined,
     H extends AnyArkType | undefined,
+    R extends {
+      [K in keyof R]: ResolverFn<ReqFor<P, B, Q, H, E> & AuthField<Auth>>;
+    } = {},
   >(
     path: P,
-    config: RouteFieldsWithoutMethodPath<P, B, Q, H> & { auth: string },
-    handler: (req: ReqFor<P, B, Q, H, E> & AuthField<Auth>) => Promise<any> | any,
+    config: RouteFieldsWithoutMethodPath<P, B, Q, H> & { auth: string; resolve?: R },
+    handler: (
+      req: ReqFor<P, B, Q, H, E> & AuthField<Auth> & ResolvedFields<R>,
+    ) => Promise<any> | any,
   ): void;
 };
 
@@ -256,9 +290,10 @@ export function createApi<Auth = undefined, E extends Env = Env>(
     B extends AnyArkType | undefined,
     Q extends AnyArkType | undefined,
     H extends AnyArkType | undefined,
+    R extends { [K in keyof R]: ResolverFn<ReqFor<P, B, Q, H, E>> } = {},
   >(
-    config: RouteFields<P, B, Q, H> & { auth?: undefined },
-    handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any,
+    config: RouteFields<P, B, Q, H> & { auth?: undefined; resolve?: R },
+    handler: (req: ReqFor<P, B, Q, H, E> & ResolvedFields<R>) => Promise<any> | any,
   ): void;
 
   // Overload 2: with auth → req gets `auth: Auth` (typed via createApi<Auth>)
@@ -267,9 +302,14 @@ export function createApi<Auth = undefined, E extends Env = Env>(
     B extends AnyArkType | undefined,
     Q extends AnyArkType | undefined,
     H extends AnyArkType | undefined,
+    R extends {
+      [K in keyof R]: ResolverFn<ReqFor<P, B, Q, H, E> & AuthField<Auth>>;
+    } = {},
   >(
-    config: RouteFields<P, B, Q, H> & { auth: string },
-    handler: (req: ReqFor<P, B, Q, H, E> & AuthField<Auth>) => Promise<any> | any,
+    config: RouteFields<P, B, Q, H> & { auth: string; resolve?: R },
+    handler: (
+      req: ReqFor<P, B, Q, H, E> & AuthField<Auth> & ResolvedFields<R>,
+    ) => Promise<any> | any,
   ): void;
 
   function api<
@@ -277,9 +317,12 @@ export function createApi<Auth = undefined, E extends Env = Env>(
     B extends AnyArkType | undefined,
     Q extends AnyArkType | undefined,
     H extends AnyArkType | undefined,
+    R extends { [K in keyof R]: ResolverFn<ResolveInput<P, B, Q, H, Auth, E>> } = {},
   >(
-    config: RouteFields<P, B, Q, H> & { auth?: string },
-    handler: (req: ReqFor<P, B, Q, H, E> & { auth: Auth }) => Promise<any> | any,
+    config: RouteFields<P, B, Q, H> & { auth?: string; resolve?: R },
+    handler: (
+      req: ReqFor<P, B, Q, H, E> & { auth: Auth } & ResolvedFields<R>,
+    ) => Promise<any> | any,
   ) {
     // Method normalization is case-insensitive and uses the single
     // normalizeMethod helper (same message as OpenAPIHono) for consistency.
@@ -349,8 +392,9 @@ export function createApi<Auth = undefined, E extends Env = Env>(
         operationId: config.operationId,
         deprecated: config.deprecated,
         hide400: config.hide400,
+        resolve: config.resolve as unknown as Record<string, RouteResolver> | undefined,
       },
-      (req) => handler(req as ReqFor<P, B, Q, H, E> & { auth: Auth }),
+      (req) => handler(req as ReqFor<P, B, Q, H, E> & { auth: Auth } & ResolvedFields<R>),
     );
   }
 
@@ -362,41 +406,52 @@ export function createApi<Auth = undefined, E extends Env = Env>(
       B extends AnyArkType | undefined,
       Q extends AnyArkType | undefined,
       H extends AnyArkType | undefined,
+      R extends { [K in keyof R]: ResolverFn<ReqFor<P, B, Q, H, E>> } = {},
     >(
       path: P,
-      config: RouteFieldsWithoutMethodPath<P, B, Q, H> & { auth?: undefined },
-      handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any,
+      config: RouteFieldsWithoutMethodPath<P, B, Q, H> & { auth?: undefined; resolve?: R },
+      handler: (req: ReqFor<P, B, Q, H, E> & ResolvedFields<R>) => Promise<any> | any,
     ): void;
     function helper<
       P extends string,
       B extends AnyArkType | undefined,
       Q extends AnyArkType | undefined,
       H extends AnyArkType | undefined,
+      R extends {
+        [K in keyof R]: ResolverFn<ReqFor<P, B, Q, H, E> & AuthField<Auth>>;
+      } = {},
     >(
       path: P,
-      config: RouteFieldsWithoutMethodPath<P, B, Q, H> & { auth: string },
-      handler: (req: ReqFor<P, B, Q, H, E> & AuthField<Auth>) => Promise<any> | any,
+      config: RouteFieldsWithoutMethodPath<P, B, Q, H> & { auth: string; resolve?: R },
+      handler: (
+        req: ReqFor<P, B, Q, H, E> & AuthField<Auth> & ResolvedFields<R>,
+      ) => Promise<any> | any,
     ): void;
     function helper<
       P extends string,
       B extends AnyArkType | undefined,
       Q extends AnyArkType | undefined,
       H extends AnyArkType | undefined,
+      R extends { [K in keyof R]: ResolverFn<ResolveInput<P, B, Q, H, Auth, E>> } = {},
     >(
       path: P,
-      config: RouteFieldsWithoutMethodPath<P, B, Q, H> & { auth?: string },
-      handler: (req: ReqFor<P, B, Q, H, E> & { auth: Auth }) => Promise<any> | any,
+      config: RouteFieldsWithoutMethodPath<P, B, Q, H> & { auth?: string; resolve?: R },
+      handler: (
+        req: ReqFor<P, B, Q, H, E> & { auth: Auth } & ResolvedFields<R>,
+      ) => Promise<any> | any,
     ): void {
       // ponytail: cast to impl signature — overloads stay strict outside, one handler cast for Auth distribution
       const apiImpl = api as unknown as (
-        config: RouteFields<P, B, Q, H> & { auth?: string },
-        handler: (req: ReqFor<P, B, Q, H, E> & { auth: Auth }) => any,
+        config: RouteFields<P, B, Q, H> & { auth?: string; resolve?: R },
+        handler: (req: ReqFor<P, B, Q, H, E> & { auth: Auth } & ResolvedFields<R>) => any,
       ) => void;
       apiImpl(
         { ...config, method, path } as RouteFields<P, B, Q, H> & {
           auth?: string;
         },
-        handler as (req: ReqFor<P, B, Q, H, E> & { auth: Auth }) => Promise<any> | any,
+        handler as (
+          req: ReqFor<P, B, Q, H, E> & { auth: Auth } & ResolvedFields<R>,
+        ) => Promise<any> | any,
       );
     }
     return helper;

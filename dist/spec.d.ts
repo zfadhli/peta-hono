@@ -122,9 +122,27 @@ export interface RouteConfig {
     deprecated?: boolean;
     /** Suppress the auto-documented 400 that path `:param` routes get (noise). */
     hide400?: boolean;
+    /**
+     * Named resource resolvers. Run AFTER param/body/query/header validation and
+     * AFTER auth middleware, immediately before the handler. Each receives the
+     * assembled request; results are assigned to req[key]. Throws go through onError.
+     * Resolvers are runtime-only and are NOT emitted into the OpenAPI document.
+     */
+    resolve?: Record<string, RouteResolver>;
 }
 /** Handler signature: receives flat request object, returns JSON-serializable object or null (→ 204). */
 export type RouteHandler = (req: Record<string, unknown>) => Record<string, unknown> | null | Promise<Record<string, unknown> | null>;
+/**
+ * A resource resolver: reads the validated flat request (path params flat at top
+ * level, body/query/headers nested, `auth` when the route is gated, `c` Hono
+ * Context) and returns the resource to inject under its resolver key. May throw
+ * APIError — errors flow through app.onError the same way handler throws do.
+ *
+ * This is the LOOSE model-level type (mirrors `RouteHandler`): strict per-route
+ * inference lives in api.ts's `api()`/`ApiMethodHelper` overloads. spec.ts must
+ * not import api.ts (ADR-011 layering), so it stores/forwards the loose shape.
+ */
+export type RouteResolver = (req: Record<string, unknown>) => unknown | Promise<unknown>;
 /** A registered route: drives both Hono dispatch and spec emission. */
 export interface StoredRoute {
     method: string;

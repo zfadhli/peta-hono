@@ -40,6 +40,47 @@ noAuth.api({ method: "GET", path: "/x", auth: "required" }, ({ auth }) => auth.u
 // @ts-expect-error — shorthand api.get(): no `auth` field on a no-auth app
 noAuth.api.get("/x", { auth: "required" }, ({ auth }) => auth.user.id);
 
+// ── `resolve` type contract (values in this section are referenced by the resolve field) ──
+// Positive: a resolver's return value is type-inferred onto the handler, and a
+// resolver on an authed route may read `auth`. R1 (accepted): resolver params are
+// annotated explicitly — the guaranteed contract (inline arrows get implicit any
+// under strict mode).
+const authedResolve = createApi<{ sub: string }>({ title: "authed-resolve" });
+authedResolve.api(
+  {
+    method: "GET",
+    path: "/a/:id",
+    auth: "required",
+    resolve: { who: async ({ auth }: { auth: { sub: string } }) => auth.sub },
+  },
+  ({ who }) => who.toUpperCase(),
+);
+authedResolve.api.get(
+  "/a/:id",
+  {
+    auth: "required",
+    resolve: {
+      post: async ({ id, auth }: { id: string; auth: { sub: string } }) => ({ id, who: auth.sub }),
+    },
+  },
+  ({ post }) => post.id,
+);
+
+// Positive: absent `resolve` leaves the handler type unchanged (no `_` fields).
+const noResolve = createApi<{ sub: string }>({ title: "no-resolve" });
+noResolve.api.get("/plain/:id", {}, ({ id }) => id);
+
+// Negative: a resolver cannot read `auth` on a no-auth app (auth is not on the
+// resolver input). Must be a type error in BOTH the classic and shorthand forms.
+// The resolver is hoisted so the config expression stays within lineWidth (100);
+// an over-long inline config gets wrapped by the formatter, which breaks the
+// suppression directive placement (it must sit on the error's anchor line).
+const authReader = async ({ auth }: { auth: { user: { id: string } } }) => auth.user.id;
+// @ts-expect-error — classic api(): resolver reads `auth` on a no-auth app
+noAuth.api({ method: "GET", path: "/x", resolve: { thing: authReader } }, ({ thing }) => thing);
+// @ts-expect-error — shorthand api.get(): resolver reads `auth` on a no-auth app
+noAuth.api.get("/x", { resolve: { thing: authReader } }, ({ thing }) => thing);
+
 // ── ADR-012 / blast-radius Fix 1: input vs emitted security-scheme types ──
 // AuthScheme is the NARROW input passed to `auth(name, mw, scheme?)` (stable
 // since v0.5.4: http bearer/basic + apiKey header/query). SecurityScheme is the

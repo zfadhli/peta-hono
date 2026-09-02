@@ -1,7 +1,19 @@
 import { type } from "arktype";
+import { eq } from "drizzle-orm";
 import { fail } from "../../src/index.js";
-import { createComment, deleteComment, getPost, listComments } from "./db.js";
+import { db } from "./db.js";
+import { comments, posts } from "./schema.js";
 import { api } from "./setup.js";
+
+type Comment = {
+  id: string;
+  postId: string;
+  content: string;
+  authorId: string;
+  createdAt: string;
+};
+
+// --- Reusable response schema ---
 
 const commentSchema = type({
   id: "string",
@@ -11,6 +23,15 @@ const commentSchema = type({
   createdAt: "string",
 });
 
+// --- Resolver: verify the parent post exists (used by GET + POST comment) ---
+// A no-auth resolver reads only `{ postId }`; thrown `fail.notFound` on a missing
+// post flows through onError the same way a handler throw does.
+const existingPost = async ({ postId }: { postId: string }) => {
+  const rows = await db.select({ id: posts.id }).from(posts).where(eq(posts.id, postId)).limit(1);
+  if (rows.length === 0) throw fail.notFound("post not found");
+  return rows[0];
+};
+
 // --- GET /posts/:postId/comments — list comments for a post ---
 
 api.get(
@@ -19,10 +40,15 @@ api.get(
     tags: ["Comments"],
     summary: "List comments on a post",
     responses: { 200: type({ comments: commentSchema.array() }) },
+    resolve: { post: existingPost },
   },
   async ({ postId }) => {
-    if (!(await getPost(postId))) throw fail.notFound("post not found");
-    return { comments: await listComments(postId) };
+    const rows = await db
+      .select()
+      .from(comments)
+      .where(eq(comments.postId, postId))
+      .orderBy(comments.createdAt);
+    return { comments: rows as Comment[] };
   },
 );
 
@@ -35,12 +61,16 @@ api.post(
     summary: "Add a comment to a post",
     body: type({ content: "string >= 1" }),
     responses: { 201: commentSchema },
-    auth: "required",
+    auth: "jwt",
+    resolve: { post: existingPost },
   },
   async ({ postId, body, auth }) => {
-    const comment = await createComment(postId, body.content, auth.user.id);
-    if (!comment) throw fail.notFound("post not found");
-    return comment;
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    await db
+      .insert(comments)
+      .values({ id, postId, content: body.content, authorId: auth.sub, createdAt: now });
+    return { id, postId, content: body.content, authorId: auth.sub, createdAt: now };
   },
 );
 
@@ -52,10 +82,13 @@ api.delete(
     tags: ["Comments"],
     summary: "Delete a comment",
     status: 204,
-    auth: "required",
+    auth: "jwt",
   },
   async ({ postId, commentId }) => {
-    if (!(await deleteComment(postId, commentId))) throw fail.notFound("comment not found");
+    const rows = await db.select().from(comments).where(eq(comments.id, commentId)).limit(1);
+    const comment = rows[0];
+    if (!comment || comment.postId !== postId) throw fail.notFound("comment not found");
+    await db.delete(comments).where(eq(comments.id, commentId));
     return null;
   },
 );

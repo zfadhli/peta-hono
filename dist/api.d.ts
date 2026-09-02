@@ -47,6 +47,23 @@ type ReqFor<P extends string, B, Q, H, E extends Env = Env> = ParamsFromPath<P> 
 type AuthField<Auth> = [Auth] extends [undefined] ? {} : {
     auth: Auth;
 };
+/**
+ * A resource resolver: reads the validated flat request, returns the resource
+ * value to inject under its key, or throws fail.notFound/fail.forbidden.
+ * Contravariant (not bivariant): a named resolver that destructures only a subset
+ * `({ id, auth })` IS assignable because `In` (the full request) is assignable to
+ * that subset argument type — the subset is a wider argument position under
+ * strictFunctionTypes, so the narrow-looking function signature accepts it.
+ */
+type ResolverFn<In> = (input: In) => unknown;
+/**
+ * Project a resolver map onto the fields the handler receives: each key's value
+ * is the awaited return type of that resolver. With the default `R = {}` this
+ * collapses to `{}`, so an absent `resolve` leaves the handler type unchanged.
+ */
+type ResolvedFields<R> = {
+    [K in keyof R]: R[K] extends (...args: never[]) => infer O ? Awaited<O> : never;
+};
 /** Shared config fields for api() overloads — minus the `auth` key. */
 type RouteFields<P extends string, B, Q, H> = {
     method: Method;
@@ -81,12 +98,18 @@ type RouteFieldsWithoutMethodPath<P extends string, B, Q, H> = Omit<RouteFields<
  * Explicit interface keeps the negative case a type error.
  */
 type ApiMethodHelper<Auth, E extends Env> = {
-    <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
+    <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined, R extends {
+        [K in keyof R]: ResolverFn<ReqFor<P, B, Q, H, E>>;
+    } = {}>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
         auth?: undefined;
-    }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
-    <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
+        resolve?: R;
+    }, handler: (req: ReqFor<P, B, Q, H, E> & ResolvedFields<R>) => Promise<any> | any): void;
+    <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined, R extends {
+        [K in keyof R]: ResolverFn<ReqFor<P, B, Q, H, E> & AuthField<Auth>>;
+    } = {}>(path: P, config: RouteFieldsWithoutMethodPath<P, B, Q, H> & {
         auth: string;
-    }, handler: (req: ReqFor<P, B, Q, H, E> & AuthField<Auth>) => Promise<any> | any): void;
+        resolve?: R;
+    }, handler: (req: ReqFor<P, B, Q, H, E> & AuthField<Auth> & ResolvedFields<R>) => Promise<any> | any): void;
 };
 /**
  * Create an Encore-style API builder on top of Hono + OpenAPI.
@@ -119,12 +142,14 @@ export declare function createApi<Auth = undefined, E extends Env = Env>(opts?: 
 }): {
     app: OpenAPIHono<E, import("hono").Schema, "/">;
     api: {
-        <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(config: RouteFields<P, B, Q, H> & {
+        <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined, R extends { [K in keyof R]: ResolverFn<ReqFor<P, B, Q, H, E>>; } = {}>(config: RouteFields<P, B, Q, H> & {
             auth?: undefined;
-        }, handler: (req: ReqFor<P, B, Q, H, E>) => Promise<any> | any): void;
-        <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined>(config: RouteFields<P, B, Q, H> & {
+            resolve?: R;
+        }, handler: (req: ReqFor<P, B, Q, H, E> & ResolvedFields<R>) => Promise<any> | any): void;
+        <P extends string, B extends AnyArkType | undefined, Q extends AnyArkType | undefined, H extends AnyArkType | undefined, R extends { [K in keyof R]: ResolverFn<ReqFor<P, B, Q, H, E> & AuthField<Auth>>; } = {}>(config: RouteFields<P, B, Q, H> & {
             auth: string;
-        }, handler: (req: ReqFor<P, B, Q, H, E> & AuthField<Auth>) => Promise<any> | any): void;
+            resolve?: R;
+        }, handler: (req: ReqFor<P, B, Q, H, E> & AuthField<Auth> & ResolvedFields<R>) => Promise<any> | any): void;
     } & {
         get: ApiMethodHelper<Auth, E>;
         post: ApiMethodHelper<Auth, E>;

@@ -37,6 +37,6 @@ export {
   createMemorySessionStore,
   generateKey,
 } from "./auth/index.js";
-export type { ArkType, OAuth2Flows, RouteConfig } from "./openapi.js";
+export type { ArkType, OAuth2Flows, RouteConfig, RouteResolver } from "./openapi.js";
 // --- Low-level (advanced use) ---
 export { arktypeValidator, normalizeMethod, OpenAPIHono } from "./openapi.js";

@@ -44,6 +44,26 @@ export class OpenAPIHono extends Hono {
         }
         const oapiPath = toOapiPath(config.path);
         const paramTokens = parseParamTokens(config.path);
+        // Reject resolver keys that collide with a framework request field or a path
+        // param. A resolver named `body`/`auth`/`c` (or a `:id` path param) would
+        // overwrite an already-assembled field or intersect in the handler type — a
+        // silent collision is worse than a fail-fast registration error (mirrors the
+        // `path must start with "/"` check and the unregistered-auth throw).
+        if (config.resolve) {
+            const reserved = new Set([
+                "body",
+                "query",
+                "headers",
+                "auth",
+                "c",
+                ...paramTokens.map((t) => t.name),
+            ]);
+            for (const key of Object.keys(config.resolve)) {
+                if (reserved.has(key)) {
+                    throw new Error(`resolve key '${key}' collides with a request field`);
+                }
+            }
+        }
         // Build middlewares from request schemas
         const mws = [];
         if (config.request?.params) {
@@ -92,6 +112,20 @@ export class OpenAPIHono extends Hono {
                 req.auth = authCtx;
             // Expose Hono context for handlers that need it (e.g., session save/destroy)
             req.c = c;
+            // Typed resource injection — AFTER params/body/query/header validators (already
+            // run as middleware) and AFTER auth middleware (req.auth already set), BEFORE
+            // the handler. Resolvers are FLAT: each reads the same pre-resolve req, so no
+            // resolver sees another's output. Collect into a separate map and Object.assign
+            // only AFTER every resolver runs. Sequential in declared key order for a
+            // deterministic first-error; no try/catch — throws reach onError unchanged
+            // (same path as handler-thrown APIError).
+            if (config.resolve) {
+                const loaded = {};
+                for (const [key, resolver] of Object.entries(config.resolve)) {
+                    loaded[key] = await resolver(req);
+                }
+                Object.assign(req, loaded);
+            }
             const result = await handler(req);
             // If handler returned a Response directly, use it as-is
             if (result instanceof Response)

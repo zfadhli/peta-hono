@@ -4,7 +4,7 @@ import type { Schema } from "hono/types";
 import { type RouteConfig, type RouteHandler, type SecurityScheme } from "./spec.js";
 export type { HttpMethod, Method, ParamToken } from "./paths.js";
 export { hasParamTokens, normalizeMethod, PARAM_HAS_RE, PARAM_TOKEN_RE, parseParamTokens, SUPPORTED_METHODS, toOapiPath, } from "./paths.js";
-export type { AuthScheme, OAuth2Flows, RouteConfig, SecurityScheme } from "./spec.js";
+export type { AuthScheme, OAuth2Flows, RouteConfig, RouteResolver, SecurityScheme, } from "./spec.js";
 export type { ArkType } from "./validation.js";
 export { arktypeValidator } from "./validation.js";
 export declare class OpenAPIHono<E extends Env = Env, S extends Schema = Schema, BasePath extends string = "/"> extends Hono<E, S, BasePath> {

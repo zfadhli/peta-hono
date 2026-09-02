@@ -506,3 +506,146 @@ describe("docs({ auth }) shorthand", () => {
     expect(() => docs({ auth: "nope" })).toThrow(/not registered/);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `resolve` — typed resource injection. Runs AFTER param/body/query/header
+// validation and AFTER auth middleware, before the handler. Its return value is
+// injected under the resolver key; throws flow through onError. It is runtime-
+// only — it must NOT appear in the emitted OpenAPI document (ADR-015).
+//
+// R1 (accepted): resolver parameters are NOT contextually typed when the resolver
+// is an INLINE arrow inside the `resolve` map (implicit-any under strict mode).
+// The GUARANTEED contract is a hoisted resolver with explicit parameter
+// annotation (`({ id, auth }: { id: string; auth: { sub: string } })`) — which is
+// the natural shape for a reusable resolver and how examples/blog uses it. These
+// tests use the guaranteed annotated form.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("resolve", () => {
+  it("injects the resolver's return value onto the handler", async () => {
+    const { api, app, docs } = createApi<undefined>({ title: "resolve" });
+    const loadItem = async ({ id }: { id: string }) => ({ id, kind: "thing" as const });
+    api.get("/items/:id", { resolve: { item: loadItem } }, async ({ item, id }) => ({
+      got: item.kind,
+      id,
+    }));
+    docs();
+    const res = await app.request("/items/42");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ got: "thing", id: "42" });
+  });
+
+  it("runs after auth — a resolver can read auth.sub on an authed route", async () => {
+    const { api, app, auth, docs } = createApi<{ sub: string }>({ title: "resolve-auth" });
+    auth("jwt", async () => ({ sub: "alice" }));
+    const who = async ({ auth }: { auth: { sub: string } }) => auth.sub;
+    api.get("/me/:id", { auth: "jwt", resolve: { who } }, async ({ who }) => ({ who }));
+    docs();
+    const res = await app.request("/me/1");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ who: "alice" });
+  });
+
+  it("a missing resource throws fail.notFound through onError", async () => {
+    const { api, app, docs } = createApi<undefined>({ title: "resolve-404" });
+    const missing = async () => {
+      throw fail.notFound("item not found");
+    };
+    api.get("/items/:id", { resolve: { item: missing } }, async ({ item }) => item);
+    docs();
+    const res = await app.request("/items/1");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "item not found" });
+  });
+
+  it("runs after body validation — an invalid body 400s before the resolver", async () => {
+    const { api, app, docs } = createApi<undefined>({ title: "resolve-validate" });
+    let ran = false;
+    const item = async ({ body }: { body: { name: string } }) => {
+      ran = true;
+      return { name: body.name };
+    };
+    api.post(
+      "/items",
+      {
+        body: type({ name: "string >= 1" }),
+        resolve: { item },
+      },
+      async ({ item }) => item,
+    );
+    docs();
+    const res = await app.request("/items", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "" }),
+    });
+    expect(res.status).toBe(400);
+    expect(ran).toBe(false);
+  });
+
+  it("resolvers are flat — a resolver never sees a sibling's output", async () => {
+    const { api, app, docs } = createApi<undefined>({ title: "resolve-flat" });
+    const first = async ({ id }: { id: string }) => ({ id, from: "first" as const });
+    const second = async ({ id }: { id: string }) => ({ id, sawFirst: false as const });
+    api.get("/items/:id", { resolve: { first, second } }, async ({ first, second }) => ({
+      first,
+      second,
+    }));
+    docs();
+    const res = await app.request("/items/7");
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    expect(body.first.from).toBe("first");
+    expect(body.second.sawFirst).toBe(false);
+  });
+
+  it("resolvers run in declaration order and the first throw wins", async () => {
+    const { api, app, docs } = createApi<undefined>({ title: "resolve-order" });
+    const order: string[] = [];
+    const a = async () => {
+      order.push("a");
+      return 1;
+    };
+    const b = async () => {
+      order.push("b");
+      return 2;
+    };
+    api.get("/items/:id", { resolve: { a, b } }, async () => ({ ok: true }));
+    docs();
+    await app.request("/items/1");
+    expect(order).toEqual(["a", "b"]);
+  });
+
+  it("an absent resolve leaves the handler unchanged (empty handler fields)", async () => {
+    const { api, app, docs } = createApi<undefined>({ title: "resolve-absent" });
+    api.get("/items/:id", {}, async ({ id }) => ({ id }));
+    docs();
+    const res = await app.request("/items/99");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: "99" });
+  });
+
+  it("rejects a resolver key that collides with a request field", () => {
+    const { api } = createApi<undefined>({ title: "resolve-collide" });
+    const bad = async ({ id }: { id: string }) => ({ id });
+    expect(() => api.get("/items/:id", { resolve: { body: bad } }, async () => ({}))).toThrow(
+      /collides with a request field/,
+    );
+  });
+
+  it("does not emit resolve into the OpenAPI document", async () => {
+    const { api, app, docs } = createApi<undefined>({ title: "resolve-spec" });
+    const loadItem = async ({ id }: { id: string }) => ({ id });
+    api.get(
+      "/items/:id",
+      { responses: { 200: type({ id: "string" }) }, resolve: { loadedItem: loadItem } },
+      async ({ loadedItem }) => loadedItem,
+    );
+    docs();
+    const res = await app.request("/openapi.json");
+    expect(res.status).toBe(200);
+    const spec: any = await res.json();
+    // resolve is runtime-only — the resolver key adds no parameter, request
+    // body, response, or security entry. The key must not appear anywhere.
+    expect(JSON.stringify(spec)).not.toContain("loadedItem");
+  });
+});
