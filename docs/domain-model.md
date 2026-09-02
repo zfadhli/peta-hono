@@ -16,7 +16,7 @@
 | **Registry & Hoisting** — `ComponentRegistry`, `sha1Hex`, `rewriteRefs`, `schemaToOA`, `getErrorSchemaRef` | `openapi.ts` private | Spec + hash + crypto mixed into routing class | `src/registry.ts` — **implemented 2026-09-02, ADR-011 step 4** (809 LOC > 800 + WeakMap cache triggers) | Pure functions `(schema, SchemaHost) => JsonSchema`; async hash isolated; per-instance registry passed explicitly. |
 | **Error Kernel** — `APIError`, `ErrorHandler`, `createErrorHandler`, `fail` | `APIError`, `ErrorHandler`, `createErrorHandler`, `fail`/`errors`/`httpErrors` in `src/errors.ts` | Cycle risk (`validator → APIError`) — solved: validator imports `APIError` from `errors.ts` | `src/errors.ts` — **implemented 2026-09-01, ADR-011 step 2** | Kernel, no deps on Hono/ArkType. Both `validation` and `openapi` import. Solves circular `api ↔ openapi`. |
 | **Spec Emission** — `buildSpec`, `buildResponses`, `addObjectParams`, `resolveSuccessCode`, OpenAPI document types, `AuthScheme`/`SecurityScheme` | `openapi.ts` class methods | God class (routing + spec + registry + errors) | `src/spec.ts` — **implemented 2026-09-02, ADR-011 step 5** | Pure functions over `(routes, ComponentRegistry, config)`; route model + auth scheme types co-located; no Hono imports. |
-| **OpenAPI Orchestration** — `OpenAPIHono`, `_routes`, `doc()`, `registerSecurityScheme` | `openapi.ts` class (~809 LOC pre-split) | Remaining orchestrator concern | `src/openapi.ts` (~270 LOC orchestrator) | Injects `paths`, `validation`, `registry`, `spec`, `errors`. Owns only Hono dispatch + `StoredRoute[]` + re-exports. |
+| **OpenAPI Orchestration** — `OpenAPIHono`, `_routes`, `doc()`, `registerSecurityScheme` | `openapi.ts` class (~809 LOC pre-split) | Remaining orchestrator concern | `src/openapi.ts` (~162 LOC orchestrator) | Injects `paths`, `validation`, `registry`, `spec`, `errors`. Owns only Hono dispatch + `StoredRoute[]` + re-exports. |
 | **DSL Facade** — `createApi`, `api()` overloads, `api.get()` shorthands (`ApiMethodHelper`), `auth()` wrap, `docs()`, `ReqFor`, `ParamsFromPath`, `RouteFields` | `src/api.ts` | Leaked `ReturnType` shorthand collapsed overloads (grilling 02) | `src/api.ts` (facade) — **fixed 2026-08-26: `ApiMethodHelper<Auth,E>` explicit two-overload interface** | Depends on `paths` + `openapi` + `errors` + `validation` types only. No `coerce*` or `sha1Hex`. |
 
 ### Bounded contexts (DDD)
@@ -41,8 +41,8 @@
 - [x] Extract `src/errors.ts` — move `APIError`+`createErrorHandler`+`fail` there; re-export from `openapi.ts`/`api.ts` for barrel stability. (ADR-011 step 2, 2026-09-01)
 - [x] Extract `src/validation.ts` — coerce*/arktypeValidator/ArkType + `isObjectSchema`; re-exported from `openapi.ts` for barrel stability. (ADR-011 step 3, 2026-09-02)
 - [x] Extract `src/registry.ts` — sha1Hex/rewriteRefs/schemaCache/schemaToOA/getErrorSchemaRef; the full `ComponentRegistry` aggregate (schemas + securitySchemes) lives in `spec.ts`; registry.ts takes a structural `SchemaHost`. Triggers fired: 809 LOC > 800 + WeakMap cache. (ADR-011 step 4, 2026-09-02)
-- [x] Extract `src/spec.ts` — OpenAPI output types, auth scheme types, route model, `buildSpec`/`buildResponses`/`addObjectParams` (pure, DI), shared `resolveSuccessCode`; openapi.ts → ~270 LOC orchestrator. (ADR-011 step 5, 2026-09-02)
-- [x] Colocated unit tests per module: `validation.test.ts` / `registry.test.ts` / `spec.test.ts` (10 files / 97 tests, 2026-09-02).
+- [x] Extract `src/spec.ts` — OpenAPI output types, auth scheme types, route model, `buildSpec`/`buildResponses`/`addObjectParams` (pure, DI), shared `resolveSuccessCode`; openapi.ts → ~162 LOC orchestrator. (ADR-011 step 5, 2026-09-02)
+- [x] Colocated unit tests per module: `validation.test.ts` / `registry.test.ts` / `spec.test.ts` (11 files / 97 tests, 2026-09-02).
 
 ---
 
@@ -155,7 +155,7 @@ export interface StoredRoute { method: string; oapiPath: string; config: RouteCo
 export function resolveSuccessCode(status: number|undefined, responseKeys: readonly string[]): string;
 export function buildSpec(routes: readonly StoredRoute[], components: ComponentRegistry, config: {openapi?:string; info:{title:string;version:string}}): Promise<OpenAPISpec>;
 
-// src/openapi.ts — orchestrator (IMPLEMENTED, ADR-011: 809 → ~270 LOC)
+// src/openapi.ts — orchestrator (IMPLEMENTED, ADR-011: 809 → ~162 LOC)
 export class OpenAPIHono<E extends Env> extends Hono<E> {
   private _routes: StoredRoute[]; private _components: ComponentRegistry;
   openapi(config: RouteConfig, handler: RouteHandler): void;
@@ -210,7 +210,7 @@ type HandlerReq = {
 
 ## References
 
-- `src/openapi.ts` — `OpenAPIHono` (orchestrator, ~270 LOC post-split); `coerceDeep`/`arktypeValidator` → `validation.ts`; `rewriteRefs`/`schemaToOA`/`sha1Hex` → `registry.ts`; `buildSpec` → `spec.ts`
+- `src/openapi.ts` — `OpenAPIHono` (orchestrator, ~162 LOC post-split); `coerceDeep`/`arktypeValidator` → `validation.ts`; `rewriteRefs`/`schemaToOA`/`sha1Hex` → `registry.ts`; `buildSpec` → `spec.ts`
 - `src/api.ts` — `createApi`, `ParamsFromPath`, `ReqFor`, `auth` wrapper
 - `docs/glossary.md` — canonical term definitions
 - `docs/adr/*` — 001–011 accepted, 012–014 accepted (this doc)

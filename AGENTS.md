@@ -32,7 +32,7 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 | Test once (full suite) | `nub run check:all` (= `nub run test` = `vitest run`) |
 | Test watch mode | `nub run test:watch` |
 | Test with coverage | `nub run test:coverage` |
-| All tests | `nub run check:all` (`src` openapi/auth/password + basic + blog + auth + strategies) |
+| All tests | `nub run check:all` (`src` openapi/validation/registry/spec/auth/password + basic + blog + auth + strategies) |
 
 ## Structure
 
@@ -47,6 +47,9 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 - `src/auth/` — built-in auth strategies (session / jwt / oauth): crypto, store, cookie, session, jwt, oauth
 - `src/password.ts` — opt-in `peta-hono/password` scrypt hash/verify helper (separate subpath, keeps the core barrel dependency-light)
 - `src/openapi.test.ts` — lib integration tests (OpenAPIHono + validator)
+- `src/validation.test.ts` — coercion + arktypeValidator tests (ADR-011 step 3)
+- `src/registry.test.ts` — sha1Hex / rewriteRefs / schemaToOA / cache tests (ADR-011 step 4)
+- `src/spec.test.ts` — buildSpec/buildResponses/addObjectParams emission policy tests (ADR-011 step 5)
 - `src/auth.test.ts` — built-in auth strategy tests (session / jwt / oauth / scheme emission / coexistence)
 - `src/password.test.ts` — `peta-hono/password` hash/verify tests
 - `src/api.test-d.ts` — type-only regression guard for the createApi overload contract (Vitest type test; run via `check:all` + `nub run typecheck`; excluded from dist/ build)

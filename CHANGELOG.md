@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.4] - 2026-09-02
+
+### Changed
+
+- **`src/openapi.ts` split by responsibility (ADR-011, steps 3–5)** — the monolithic orchestrator (809 LOC) is decomposed into focused modules: `src/validation.ts` (ArkType guards, `resolveRef`/`coerce*`, `arktypeValidator`), `src/registry.ts` (`sha1Hex`/`rewriteRefs`, `schemaToOA`, `getErrorSchemaRef`), and `src/spec.ts` (OpenAPI document model + emission policy), leaving `src/openapi.ts` a ~162-LOC orchestrator plus re-exports. Each extraction took the growing component/schemas map (`SchemaHost`) as an explicit parameter (DI-friendly, no shared mutable module state), and `dist/` gained `validation.js`/`registry.js`/`spec.js` with the old inline modules removed from `dist/openapi.js`.
+- **Pure spec emission + shared `resolveSuccessCode`** — `buildSpec`/`buildResponses`/`addObjectParams` are now pure functions over `(routes, ComponentRegistry, config)`; the success-code policy (`status ?? lowest declared 2xx/3xx ?? 200`) lives once in `spec.ts` and is shared by both the emitter and the runtime dispatch so they cannot drift.
+- **Colocated per-module tests** — `src/validation.test.ts`, `src/registry.test.ts`, and `src/spec.test.ts` cover coercion/validator, hashing/hoisting/cache, and emission policy respectively, alongside the library-level `src/openapi.test.ts`.
+- **Self-checks restructured** — the hand-rolled no-framework `*.selfcheck.ts` assertion counters were migrated to real Vitest `expect()` assertions across `examples/*/app.test.ts`, and a type-only `src/api.test-d.ts` regression guard was added for the `createApi` overload contract. Removes the hardcoded-count bookkeeping.
+
+### Notes
+
+- **No public API changes** — all public re-exports are preserved (`OpenAPIHono`, `arktypeValidator`, `normalizeMethod`, auth strategies, and all public types keep their names); this is a non-breaking internal refactor. Full suite: 11 files / 97 tests, `Type Errors: no errors`.
+
 ## [0.6.3] - 2026-09-01
 
 ### Added

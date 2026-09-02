@@ -112,7 +112,7 @@ Run with `nub index.ts` (or `node index.ts` if you've built the lib).
   - Stores are injectable: `createMemorySessionStore()` / `createMemoryRefreshTokenStore()`, or any object implementing `SessionStore` / `RefreshTokenStore` for production. **ponytail:** the default stores are in-memory (process-local, lost on restart) — a real deployment should supply a durable store (Postgres/Redis/KV) that implements the same interface. The contracts are tiny (`SessionStore`: `get`/`set`/`delete`; `RefreshTokenStore`: `get`/`save`/`delete`/`getFamily`/`deleteFamily`), so a DB adapter is a small table mapping: a session row holds `sid` + a `data` JSON blob + `expires_at` (pruned on `get`), and a refresh-token row holds `token_hash` + `sub` + `family_id` + `expires_at` + `used`, with `getFamily`/`deleteFamily` filtering on `family_id`. See `examples/blog/db.ts` for the SQLite+Drizzle pattern and `src/auth/store.ts` for the exact interfaces.
   - **Opt-in password hashing** — `import { hashPassword, verifyPassword } from 'peta-hono/password'`. `hashPassword` returns a self-describing `scrypt` hash (work factors + salt + derived key, via `@noble/hashes`); `verifyPassword` re-derives and constant-time-compares. scrypt is the default (argon2id is ~5× slower in pure JS). **`ponytail:`** credential hashing only — it does not manage users/passwords/sessions (that stays the caller's job).
 - **`docs(specPath?, uiPath?)` / `docs({ specPath?, uiPath? })`** — mounts the OpenAPI JSON spec and Scalar docs UI. Both positional (`docs("/openapi.json", "/docs")`) and options-object (`docs({ specPath, uiPath })`) forms are supported. **`docs({ auth })` opt-in guard** — pass a raw Hono `MiddlewareHandler` or a registered auth name (e.g. `docs({ auth: 'session' })`) to gate both the spec and UI routes. The guard is registered before mounting (the auth-guarded recipe, no `app.use` boilerplate) and rejects via the same throw-to-onError path as route auth. The unauthenticated default is unchanged (non-breaking).
-- **Header schemas must use lowercase keys** — Hono lowercases incoming headers via Fetch `Headers`; declare `type({ "x-api-key": "string" })` not `type({ "X-Api-Key": "string" })`. The spec emits lowercased header param names so runtime and docs match (`_addObjectParams` lowercases when `in === "header"`).
+- **Header schemas must use lowercase keys** — Hono lowercases incoming headers via Fetch `Headers`; declare `type({ "x-api-key": "string" })` not `type({ "X-Api-Key": "string" })`. The spec emitter lowercases header param names so runtime and docs match (`addObjectParams` in `src/spec.ts` lowercases when `in === "header"`).
 - **Path params & `{regex}`** — `:name`, `:id?`, `:id{[0-9]+}` are parsed from the path and typed at the top level. **The `{regex}` in `:param{regex}` is enforced by Hono's router, not the ArkType param validator** — a mismatch produces a 404 (route doesn't match), and the ArkType schema types/validates the segment as `string`.
 - **Success code default** — the handler/status defaults to `status`, else the **lowest** declared 2xx/3xx response, else `200`. Because object keys are enumerated in ascending numeric order, `{ 200, 201 }` and `{ 201, 200 }` both default to `200`; set `status: 201` to get `201`.
 - **`debug` is dev-only** — `createApi({ debug: true })` reveals `{ error, stack }` only when `NODE_ENV=development` (or `test`). In production — including a deploy that forgets to set `NODE_ENV`, or a Bun/Deno/edge runtime without `process` — it **withholds** details by default rather than leaking them. Strip `debug` (or set `NODE_ENV=development`) in dev; never ship it in prod bundles.
@@ -154,12 +154,18 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
 
 ```
 src/
-  openapi.ts    — OpenAPIHono class, arktypeValidator, APIError, OpenAPI spec emission
+  openapi.ts    — OpenAPIHono orchestrator: route dispatch + StoredRoute[] + doc()/registerSecurityScheme + re-exports (162 LOC; ADR-011)
   api.ts        — createApi, api, auth (+ strategies), docs (DSL facade)
-  paths.ts      — single source for path & method grammar (PARAM_TOKEN_RE, normalizeMethod, toOapiPath)
+  errors.ts     — error kernel: APIError, ErrorHandler, createErrorHandler, fail/errors/httpErrors (zero-dep leaf)
+  paths.ts      — single source for path & method grammar (PARAM_TOKEN_RE, parseParamTokens, normalizeMethod, toOapiPath, SUPPORTED_METHODS)
+  validation.ts — ArkType guards, resolveRef/coerceDeep/coerceValue, arktypeValidator (throws APIError(400))
+  registry.ts   — sha1Hex, rewriteRefs, schemaCache, schemaToOA, getErrorSchemaRef (pure over a SchemaHost)
+  spec.ts       — OpenAPI doc model + pure emission: buildSpec/buildResponses/addObjectParams, resolveSuccessCode
   auth/         — built-in auth strategies (crypto, store, cookie, session, jwt, oauth)
   password.ts   — opt-in `peta-hono/password` scrypt hash/verify helper
   index.ts      — public barrel (re-exports all public API)
+  *.test.ts     — per-module + integration tests (openapi, validation, registry, spec, auth, password)
+  api.test-d.ts — type-only regression guard for the createApi overload contract
 examples/
   basic/        — single-file example app
     routes.ts     — route definitions
