@@ -1,11 +1,11 @@
-# ADR 011 — Split `src/openapi.ts` by responsibility (deferred incremental)
+# ADR 011 — Split `src/openapi.ts` by responsibility (incremental, completed)
 
 **Date:** 2026-08-26
-**Status:** Proposed — **deferred incremental (do NOT big-bang split now)**
+**Status:** Accepted — incremental split implemented (2026-09-02, steps 1–5)
 
 ## Context
 
-`src/openapi.ts` is ~700 LOC and owns five concerns (smell: **divergent change**):
+`src/openapi.ts` was ~700 LOC and owned five concerns (smell: **divergent change**):
 
 | Concern | Symbols | LOC | Change trigger |
 |---------|---------|-----|----------------|
@@ -15,7 +15,7 @@
 | **Registry / hashing** | `ComponentRegistry`, `sha1Hex`, `rewriteRefs`, `_schemaToOA`, `_getErrorSchemaRef` | ~120 | Stable hash / `$defs` hoisting (ADR-006) |
 | **Error kernel** | `APIError`, `ErrorHandler`, `createErrorHandler` | ~40 | Error policy / `debug` gating (ADR-005) |
 
-`src/api.ts` (~320 LOC) already isolates the DSL facade (`createApi`, overloads, `ReqFor`). The file passes all selfchecks (`nub run check:all` 6/6 + blog 41), snapshot is stable, and `_buildSpec`/`_schemaToOA` are tightly coupled (share `_components` mutable `Map` + `rewriteRefs` in-place). Extracting naïvely risks:
+`src/api.ts` (~320 LOC) already isolated the DSL facade (`createApi`, overloads, `ReqFor`). The file passed all selfchecks (`nub run check:all` 6/6 + blog 41), snapshot is stable, and `_buildSpec`/`_schemaToOA` are tightly coupled (share `_components` mutable `Map` + `rewriteRefs` in-place). Extracting naively risked:
 
 - Circular `api ↔ openapi ↔ validation ↔ errors` if `APIError` stays in `openapi.ts` (validator must throw it).
 - Leaky `ComponentRegistry` mutable map shared across async `sha1Hex` calls — split requires explicit ownership.
@@ -25,49 +25,48 @@ The project has no prior module-split ADR; ADR-002 chose in-repo `OpenAPIHono` a
 
 ## Decision
 
-**Defer a full split. Do incremental extraction in priority order; do not create `src/registry.ts` or `src/validation.ts` in this PR.**
+**Split incrementally, in priority order — never big-bang.** Each step is a separate commit, gated on LOC / change frequency, keeping the barrel and `dist/` green throughout:
 
-Proposed order (each is a separate commit, gated on LOC / change frequency):
+1. **Done (2026-08-26, ADR-010) — `src/paths.ts`:** `PARAM_TOKEN_RE`, `parseParamTokens`, `hasParamTokens`, `normalizeMethod`, `toOapiPath`, `SUPPORTED_METHODS` + types `ParamToken`, `HttpMethod`, `Method`. Pure, zero deps, fixed the duplicated-regex smell immediately. Re-exported from `openapi.ts` for barrel stability.
+2. **Done (2026-09-01) — `src/errors.ts` (kernel):** `APIError`, `ErrorHandler`, `createErrorHandler`, `fail`/`errors`/`httpErrors`. No deps. Both `openapi.ts` and `api.ts` import from kernel — broke the `validator → APIError` cycle that previously forced `APIError` to live in `openapi.ts`.
+3. **Done (2026-09-02) — `src/validation.ts`:** `ArkType`, `is*Type` guards, `resolveRef`, `coerceValue`, `coerceDeep`, `arktypeValidator`. Depends only on `errors.ts` + `arktype`. Imported by `openapi.ts` for middleware assembly; `ArkType` + `arktypeValidator` re-exported for barrel stability.
+4. **Done (2026-09-02) — `src/registry.ts`:** `sha1Hex`, `rewriteRefs`, `SchemaCacheEntry`/`schemaCache`, `schemaToOA`, `getErrorSchemaRef`. **Triggered**: `openapi.ts` hit 809 LOC (>800 gate) and the `WeakMap<Type,JsonSchema>` cache was added (1caccde) — both named triggers. Split requires explicit ownership: the functions take the per-instance schemas map (`SchemaHost`) as a parameter; `OpenAPIHono` passes `_components` explicitly, and the error-ref memo is per-registry via `WeakMap`.
+5. **Done (2026-09-02) — `src/spec.ts` (step 5 added during implementation):** OpenAPI document types, `AuthScheme`/`SecurityScheme`/`OAuth2Flows`, `RouteConfig`/`RouteHandler`/`StoredRoute`, plus `buildSpec`/`buildResponses`/`addObjectParams` as **pure functions** over `(routes, ComponentRegistry, config)` and the shared `resolveSuccessCode` policy (used by both the emitter and the runtime dispatch so they cannot drift). This was the largest remaining concern (~350 LOC) and the only way `openapi.ts` reaches the ~280 LOC orchestrator target below.
 
-1. **Now — `src/paths.ts` (ADR-010):** `PARAM_TOKEN_RE`, `parseParamTokens`, `hasParamTokens`, `normalizeMethod`, `toOapiPath`, `SUPPORTED_METHODS` + types `ParamToken`, `HttpMethod`, `Method`. Pure, zero deps, fixes duplication smell immediately. Re-export from `openapi.ts` for barrel stability.
-2. **Next — `src/errors.ts` (kernel):** Move `APIError`, `ErrorHandler`, `createErrorHandler`, `fail/errors/httpErrors`. No deps. Both `openapi.ts` and `api.ts`/`validation.ts` import from kernel — breaks the `validator → APIError` cycle that currently forces `APIError` to live in `openapi.ts`.
-3. **After — `src/validation.ts`:** Move `coerceDeep`, `coerceValue`, `resolveRef`, `is*Type`, `arktypeValidator`. Depends only on `errors.ts` + `arktype`. Imported by `openapi.ts` for middleware assembly.
-4. **Defer — `src/registry.ts`:** `ComponentRegistry`, `sha1Hex`, `rewriteRefs`, `schemaToOA`, `getErrorSchemaRef`. Defer until `openapi.ts` exceeds **800 LOC** *or* a second divergent change touches both coercion and spec hashing in the same PR. Until then, keep it co-located with `OpenAPIHono` — `_components` + `_buildSpec` cohesion outweighs SRP.
-
-Target end state (when all four are extracted, `openapi.ts` ≈ 280 LOC orchestrator):
+Target end state (implemented):
 
 ```
 src/errors.ts      ← kernel (no deps)
 src/paths.ts       ← pure
 src/validation.ts  ← errors + arktype
-src/registry.ts    ← errors + Web Crypto
-src/openapi.ts     ← Hono + validation + registry + paths + errors (orchestrator)
+src/registry.ts    ← arktype + Web Crypto (SchemaHost)
+src/spec.ts        ← validation + registry + paths (pure emission + route model)
+src/openapi.ts     ← Hono dispatch + StoredRoute[] + re-exports (orchestrator)
 src/api.ts         ← paths + openapi (types) + errors (facade)
 src/index.ts       ← barrel
 ```
 
-Barrel (`src/index.ts`) re-exports public symbols from their new homes so `import { APIError } from "peta-hono"` never breaks.
+Layering is acyclic: `errors ← validation ← registry ← spec ← openapi ← api ← index` (plus `paths` feeding `spec`/`openapi`/`api`). `registry.ts` depends only on a structural `SchemaHost` (`{ schemas: Map }`), not on `openapi.ts` — `SecurityScheme` stays with the spec model so no module imports the orchestrator type.
 
-**Threshold to revisit:** if `openapi.ts` >800 LOC, or two consecutive PRs edit `coerce*` and `_buildSpec` together, or `toJsonSchema()` caching (`WeakMap<Type,JsonSchema>`) is added (grilling Q23) and belongs in `registry.ts`, trigger step 4.
+Barrel (`src/index.ts`) re-exports public symbols from their new homes so `import { APIError } from "peta-hono"` never breaks. Public API unchanged: `OpenAPIHono`, `arktypeValidator`, `normalizeMethod`, `generateKey`, auth strategies, and all public types keep their names.
 
 ## Alternatives
 
-- **Big-bang split now into `src/{paths,validation,registry,errors}.ts`:** Cleanest SRP, lowest divergent-change risk, but highest churn: 4 new files, `dist/` + `package.json` `files` + `tsconfig` updates, circular import audit, and review cost for a file that has not yet caused a merge conflict. Rejected for now — incremental achieves same end state with less risk.
-- **Keep `src/openapi.ts` monolith forever (single file is simpler):** Avoids indirection, but divergent change persists — spec hashing fix risks breaking coercion, param regex stays duplicated, and onboarding suffers (700 → 900 LOC ceiling noted in ADR-002). Rejected — at least `paths.ts` + `errors.ts` pay off immediately.
+- **Big-bang split into 4 new files at once:** Cleanest SRP, lowest divergent-change risk, but highest churn — 4 new files, `dist/` + `package.json` `files` + `tsconfig` updates, circular import audit, and review cost for a file that had not yet caused a merge conflict. Rejected — incremental achieves the same end state with less risk (and is what was executed).
+- **Keep `src/openapi.ts` monolith forever (single file is simpler):** Avoids indirection, but divergent change persists — spec hashing fix risks breaking coercion, param regex stays duplicated, and onboarding suffers (700 → 900 LOC ceiling noted in ADR-002). Rejected — `paths.ts` + `errors.ts` paid off immediately and the 800-LOC gate fired before long.
 - **Split by layer `src/core/{routing,validation,spec}.ts` nested folder:** Adds directory depth for 2–3 files; premature. Prefer flat `src/*.ts` until >6 modules.
 
 ## Consequences
 
-- **Migration:** No breaking change if re-exports preserved. Each extraction is a mechanical move + `s/\.ts/.js/` import fix (Nub `bundler` → `ts` resolution, `NodeNext` build preserves `.js`). `npm publish` includes new `dist/*.js` automatically via `files:["dist"]`.
-- **Testing:** After each step, `nub run typecheck`, `nub run lint`, `nub run check:all` (lib 6 + basic + blog + auth) must stay green; `spec.snapshot.json` must not diff (except `paths.ts` — no spec change). Add unit test for `parseParamTokens` after step 1.
-- **Concurrency/docs:** No runtime concurrency change — `ComponentRegistry` stays per-`OpenAPIHono` instance, `Map.setIfAbsent` pattern unchanged. Update `docs/glossary.md` and `docs/domain-model.md` per extraction; cross-ref ADRs 005/006/008 for ownership.
-- **When NOT to follow this ADR:** If the next feature is `toJsonSchema()` caching or CSV query `?ids=1,2` support — those touch `validation` + `registry` together and justify step 4 early.
+- **Migration:** No breaking change — re-exports preserved. Each extraction was a mechanical move + `s/.ts/.js/` import fix (Nub `bundler` → `ts` resolution, `NodeNext` build preserves `.js`). `npm publish` includes new `dist/*.js` automatically via `files:["dist"]`.
+- **Testing:** After each step, `nub run typecheck`, `nub run lint`, `nub run check:all` (lib + basic + blog + auth) stayed green; `spec.snapshot.json` did not diff (except `paths.ts` — no spec change). Colocated unit tests added per module: `src/validation.test.ts` (coercion/validator), `src/registry.test.ts` (hash/hoisting/cache), `src/spec.test.ts` (emission policy). Full suite: 10 files / 97 tests.
+- **Concurrency/docs:** No runtime concurrency change — `ComponentRegistry` stays per-`OpenAPIHono` instance, `Map.setIfAbsent` pattern unchanged. `docs/glossary.md` and `docs/domain-model.md` updated per extraction; cross-ref ADRs 005/006/008 for ownership.
+- **Threshold to revisit:** if `spec.ts` > ~400 LOC, or two consecutive PRs edit `coerce*` and `buildSpec` together, consider splitting `spec.ts` (e.g. `params.ts` for `addObjectParams`).
 
 ## References
 
-- `src/openapi.ts` — ~700 LOC, `coerce*`, `toOapiPath`, `rewriteRefs`, `_buildSpec`
-- `src/api.ts:193,413` — duplicated regex, `createApi` facade
-- `docs/domain-model.md` §1 — bounded contexts / module map
+- `src/openapi.ts` — pre-split ~700 LOC, `coerce*`, `toOapiPath`, `rewriteRefs`, `_buildSpec`; post-split ~270 LOC orchestrator
+- `src/api.ts:193,413` — duplicated regex (fixed), `createApi` facade
+- `docs/domain-model.md` §1 — bounded contexts / module map (updated 2026-09-02)
 - `docs/adr/002-in-repo-openapihono.md` — ceiling "700 LOC … future split"
 - `.scratch/grill-with-docs/domain-model.md` §3.1 — proposed `src/{types,validation,paths,registry}` map
-
