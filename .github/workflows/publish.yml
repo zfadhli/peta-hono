@@ -15,6 +15,11 @@ jobs:
       - uses: nubjs/setup-nub@v0
         with:
           cache: true
+          # Pin a modern Node so the bundled npm ships OIDC trusted publishing
+          # (npm >= 11.5.1 auto-detects ACTIONS_ID_TOKEN_REQUEST_*). nubjs/setup-nub
+          # fronts this version on PATH, so bare `npm`/`node` below are this one.
+          # Node 22 bundles npm 10.9.x, which is below the OIDC threshold.
+          node-version: 26
       - run: nub ci
       - run: nub run typecheck
       - run: nub run check:all
@@ -22,28 +27,17 @@ jobs:
       # produce no diff. npm publish also runs prepublishOnly (same gate), but
       # surfacing it here gives a clear failure point before the registry call.
       - run: nub run check:dist
-      # npm Trusted Publishing (OIDC). Two prerequisites must hold or npm
-      # reports `ENEEDAUTH` instead of doing the OIDC exchange:
-      #   1. npm >= 11.5.1 (auto-detects ACTIONS_ID_TOKEN_REQUEST_*).
-      #   2. no `_authToken` entry in .npmrc — a token line (even an empty
-      #      one) makes npm think auth is configured and skip OIDC.
-      # nubjs/setup-nub may write a bare `_authToken=`; strip it. The
-      # following also prints diagnostics the first time in case it fails.
-      - name: Ensure npm supports OIDC trusted publishing
+      # npm Trusted Publishing (OIDC) via the pinned node-version's npm
+      # (>=11.5.1). Defensive: a bare/empty `_authToken=` in .npmrc makes npm
+      # treat auth as configured and skip the OIDC exchange -> ENEEDAUTH, so
+      # strip it. Print versions for the record.
+      - name: Inspect npm + strip _authToken (let OIDC kick in)
         run: |
-          echo "npm=$(npm --version) node=$(node --version)"
-          echo "userconfig=$(npm config get userconfig || true)"
-          npm install -g npm@latest --force >/dev/null 2>&1 || echo "npm self-upgrade failed"
-          echo "npm=$(npm --version) after upgrade"
-      - name: Strip empty _authToken from .npmrc (let OIDC kick in)
-        run: |
+          echo "npm=$(npm --version) node=$(node --version) userconfig=$(npm config get userconfig || true)"
           for f in "$HOME/.npmrc" "${NPM_CONFIG_USERCONFIG:-}"; do
             [ -z "$f" ] && continue
             [ -f "$f" ] || continue
-            echo "--- $f ---"
-            sed -E 's#(_authToken=).*#\1<redacted>#' "$f"
             sed -i '/_authToken/d' "$f"
           done
-          npm config list 2>/dev/null | grep -iE 'registry|_authToken|userconfig' | sed -E 's#(_authToken=).*#\1<redacted>#' || true
       - name: Publish to npm (OIDC)
         run: npm publish
