@@ -1,0 +1,65 @@
+{
+  "nextId": 6,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Ticket 03: cookie.ts hardening + CookieTransport",
+      "description": "Harden src/auth/cookie.ts: add __Host-/__Secure- prefix, enforce SameSite=None requires Secure, and a CookieTransport helper (read/set/clear). Add selfcheck block. Typecheck + lint + auth selfcheck green.",
+      "status": "completed",
+      "activeForm": "Implementing cookie serialization hardening + CookieTransport",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787937031327,
+      "updatedAt": 1787937190413
+    },
+    {
+      "id": "2",
+      "subject": "Ticket 04: session CSRF origin + Secure cookie defaults + OAuth PKCE",
+      "description": "session.ts: csrf: \"origin\"|\"double-submit\" default \"origin\", origin option, cookie block defaulting secure:true (+host-prefix). oauth.ts: usePKCE default true, hardened state cookie, provider error query param via onError. Update selfcheck + strategies example. check:all green.",
+      "status": "completed",
+      "activeForm": "Implementing lean security defaults (session CSRF, Secure cookies, OAuth PKCE)",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787937031328,
+      "updatedAt": 1787937446848
+    },
+    {
+      "id": "3",
+      "subject": "Ticket 05: JWT keys/JWKS rotation + refreshTransport cookie",
+      "description": "jwt.ts: keys/kid rotation map, jwks (URL|{keys:JWK[]}), honor algorithms bounds, optional refreshTransport cookie (set/clear via CookieTransport). Add selfcheck tests. check:all green.",
+      "status": "completed",
+      "activeForm": "Implementing JWT capability unlock + refresh-token cookie transport",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787937031329,
+      "updatedAt": 1787937779230
+    },
+    {
+      "id": "4",
+      "subject": "Ticket 06: opt-in peta-hono/password scrypt helper",
+      "description": "New src/password.ts exposing hashPassword/verifyPassword via @noble/hashes scrypt (self-describing params + salt, constant-time verify). Add peta-hono/password subpath export in package.json + src/password.selfcheck.ts wired into check:all. Core barrel stays dependency-light.",
+      "status": "completed",
+      "activeForm": "Implementing opt-in password hashing helper",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787937031330,
+      "updatedAt": 1787937859815
+    },
+    {
+      "id": "5",
+      "subject": "Ticket 07: docs/ADR reconciliation",
+      "description": "Write docs/adr/013 + 014, update glossary.md, domain-model.md, README.md, CHANGELOG.md [Unreleased], AGENTS.md. No behavior change.",
+      "status": "completed",
+      "activeForm": "Reconciling docs and ADRs",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787937031331,
+      "updatedAt": 1787938445610
+    }
+  ]
+}

@@ -49,12 +49,12 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 - `src/openapi.test.ts` — lib integration tests (OpenAPIHono + validator)
 - `src/auth.test.ts` — built-in auth strategy tests (session / jwt / oauth / scheme emission / coexistence)
 - `src/password.test.ts` — `peta-hono/password` hash/verify tests
-- `src/typecheck.selfcheck.ts` — type-only regression guard (tsc --noEmit; excluded from dist/ build)
-- `examples/basic/` — single-file example app (routes.ts + index.ts + selfcheck.test.ts; hello, things, search, legacy)
-- `examples/blog/` — multi-file blog API (setup.ts singleton, db.ts + schema.ts, posts.ts + comments.ts, index.ts + selfcheck.test.ts)
+- `src/api.test-d.ts` — type-only regression guard for the createApi overload contract (Vitest type test; run via `check:all` + `nub run typecheck`; excluded from dist/ build)
+- `examples/basic/` — single-file example app (routes.ts + index.ts + app.test.ts; hello, things, search, legacy)
+- `examples/blog/` — multi-file blog API (setup.ts singleton, db.ts + schema.ts, posts.ts + comments.ts, index.ts + app.test.ts)
 - `examples/blog/spec.snapshot.json` — golden OpenAPI spec for regression detection
-- `examples/auth/` — peta-auth integration example (routes.ts + index.ts + types.d.ts + selfcheck.test.ts)
-- `examples/strategies/` — built-in auth strategies example (session + jwt + google oauth; routes.ts + index.ts + selfcheck.test.ts)
+- `examples/auth/` — peta-auth integration example (routes.ts + index.ts + types.d.ts + app.test.ts)
+- `examples/strategies/` — built-in auth strategies example (session + jwt + google oauth; routes.ts + index.ts + app.test.ts)
 
 ## Conventions
 
@@ -62,7 +62,7 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated 
 - ESM modules (`"type": "module"` in package.json)
 - Import paths use `.js` extensions (Nub resolves to `.ts`)
 - `ponytail:` comments mark deliberate simplifications with ceiling/upgrade path
-- Tests use **Vitest** — `*.test.ts` under `src/` and `examples/`, with explicit `import { describe, it, expect } from "vitest"` (no globals, no config churn). The former runnable `*.selfcheck.ts` files (hand-rolled assert counters) were migrated to `*.test.ts`; real `expect()` assertions remove the hardcoded-count bookkeeping. `vitest.config.ts` drives include/environment/timeout.
+- Tests use **Vitest** — `*.test.ts` under `src/` and `examples/`, with explicit `import { describe, it, expect } from "vitest"` (no globals, no config churn); `*.test-d.ts` for type-only regression guards (vitest typecheck + `nub run typecheck`). The former runnable `*.selfcheck.ts` files (hand-rolled assert counters) were migrated to `*.test.ts`; real `expect()` assertions remove the hardcoded-count bookkeeping. `vitest.config.ts` drives include/environment/timeout.
 - TypeScript strict mode, noUncheckedIndexedAccess
 - Lint/format via Biome covers `src/` + `examples/` (lefthook pre-commit + `biome.json` overrides exclude `examples/blog/spec.snapshot.json` which is a generated golden file)
 - TypeScript module resolution: `tsconfig.json` uses `bundler` for `nub file.ts` dev (Nub resolves `.js` → `.ts`); `tsconfig.build.json` uses `NodeNext` for `dist/` build (preserves `.js` ESM imports for published artifact). Both target `ESNext`/`ES2022` with `strict` + `noUncheckedIndexedAccess`.

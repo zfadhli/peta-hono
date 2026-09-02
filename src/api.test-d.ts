@@ -1,8 +1,9 @@
 /**
  * Type-level regression guard for the method-shorthand overload contract (grilling 02 / spec S1).
  *
- * Type-checked by `nub run typecheck` (tsc --noEmit over src/ + examples/). NOT built into
- * dist/ (src/**\/*.selfcheck.ts is excluded by tsconfig.build.json) and not run at runtime.
+ * Convention: `*.test-d.ts` — Vitest type tests (run via `nub run check:all` / `vitest run`),
+ * and type-checked by `nub run typecheck` (tsc --noEmit over src/ + examples/). NOT built into
+ * dist/ (`*.test-d.ts` excluded by tsconfig.build.json) and not run at runtime.
  *
  * Pins the S1 contract: reading `auth` in a handler is a TYPE ERROR on a no-auth app
  * (createApi<undefined>) through BOTH the classic api() form and the shorthand api.get() form.

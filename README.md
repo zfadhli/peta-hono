@@ -116,7 +116,7 @@ Run with `nub index.ts` (or `node index.ts` if you've built the lib).
 - **Path params & `{regex}`** — `:name`, `:id?`, `:id{[0-9]+}` are parsed from the path and typed at the top level. **The `{regex}` in `:param{regex}` is enforced by Hono's router, not the ArkType param validator** — a mismatch produces a 404 (route doesn't match), and the ArkType schema types/validates the segment as `string`.
 - **Success code default** — the handler/status defaults to `status`, else the **lowest** declared 2xx/3xx response, else `200`. Because object keys are enumerated in ascending numeric order, `{ 200, 201 }` and `{ 201, 200 }` both default to `200`; set `status: 201` to get `201`.
 - **`debug` is dev-only** — `createApi({ debug: true })` reveals `{ error, stack }` only when `NODE_ENV=development` (or `test`). In production — including a deploy that forgets to set `NODE_ENV`, or a Bun/Deno/edge runtime without `process` — it **withholds** details by default rather than leaking them. Strip `debug` (or set `NODE_ENV=development`) in dev; never ship it in prod bundles.
-- **Reading `auth` without `{ auth: 'required' }`** — `req.auth` is only present when the route declares `auth` (and the app is registered with `createApi<Auth>`). A no-auth route that reads `auth` fails typecheck with `Property 'auth' does not exist on type 'ReqFor<...>'` — that means the route isn't auth-gated; add `auth: 'required'` to fix it. This negative case is pinned in `src/typecheck.selfcheck.ts`.
+- **Reading `auth` without `{ auth: 'required' }`** — `req.auth` is only present when the route declares `auth` (and the app is registered with `createApi<Auth>`). A no-auth route that reads `auth` fails typecheck with `Property 'auth' does not exist on type 'ReqFor<...>'` — that means the route isn't auth-gated; add `auth: 'required'` to fix it. This negative case is pinned in `src/api.test-d.ts`.
 - **`fail`** — throw named HTTP errors: `throw fail.notFound('post not found')`. `fail` is the canonical, single helper. (The `errors` and `httpErrors` aliases are deprecated pure synonyms kept for backward compatibility.) Helpers for common codes: `fail.badRequest` (400), `fail.unauthorized` (401), `fail.forbidden` (403), `fail.notFound` (404), `fail.conflict` (409), `fail.unprocessableEntity` (422), `fail.tooManyRequests` (429), `fail.internalServerError` (500), `fail.badGateway` (502), `fail.serviceUnavailable` (503), `fail.gatewayTimeout` (504). Each accepts an optional message (sensible default if omitted). For custom status codes, use `throw new APIError(status, message)` directly.
 
 Handler returns a plain object (no `c.json()`). The library wraps it in the correct response. Return `null` for 204 No Content.
@@ -164,7 +164,7 @@ examples/
   basic/        — single-file example app
     routes.ts     — route definitions
     index.ts      — server entry point
-    selfcheck.test.ts  — end-to-end test suite (Vitest)
+    app.test.ts       — end-to-end test suite (Vitest)
   blog/         — multi-file blog API
     setup.ts      — shared createApi() + auth singleton
     db.ts         — data layer (Drizzle ORM + SQLite)
@@ -172,17 +172,17 @@ examples/
     posts.ts      — post CRUD routes
     comments.ts   — nested comment routes
     index.ts      — server entry
-    selfcheck.test.ts  — end-to-end test suite (Vitest)
+    app.test.ts       — end-to-end test suite (Vitest)
     spec.snapshot.json — golden OpenAPI spec for regression detection
   auth/         — peta-auth integration example (register/login/profile/logout)
     routes.ts     — route definitions
     index.ts      — server entry
     types.d.ts    — typed c.var.session augmentation
-    selfcheck.test.ts  — end-to-end test suite (Vitest)
+    app.test.ts       — end-to-end test suite (Vitest)
   strategies/   — built-in auth strategies example (session + jwt + google oauth)
     routes.ts     — route definitions
     index.ts      — server entry
-    selfcheck.test.ts  — end-to-end test suite (Vitest)
+    app.test.ts       — end-to-end test suite (Vitest)
 dist/           — built output (created by `nub run build`)
 ```
 

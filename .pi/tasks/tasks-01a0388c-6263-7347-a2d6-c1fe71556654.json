@@ -1,0 +1,62 @@
+{
+  "nextId": 5,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Rebuild dist/ from source and verify artifact contents",
+      "description": "Run `nub run build` to regenerate dist/. Verify the fresh artifact: dist/openapi.js uses Web Crypto (no node:crypto import), arktypeValidator throws APIError on ArkErrors, no createRoute anywhere, dist/api.d.ts declares debug option on createApi, dist/index.d.ts exposes AuthScheme/ArkType/RouteConfig.",
+      "status": "completed",
+      "activeForm": "Rebuilding dist/ from source",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787655283727,
+      "updatedAt": 1787655302368
+    },
+    {
+      "id": "2",
+      "subject": "Add artifact freshness gate (prepublish + CI)",
+      "description": "Commit dist/ (remove from .gitignore) so a reference artifact exists. Add check:dist script = `nub run build && git diff --exit-code -- dist/`, wire into prepublishOnly, and add a CI step in .github/workflows/publish.yml before npm publish. Prove the gate fails on stale dist and passes on fresh dist.",
+      "status": "completed",
+      "activeForm": "Adding artifact freshness gate",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787655283729,
+      "updatedAt": 1787661945803
+    },
+    {
+      "id": "3",
+      "subject": "Full verification: typecheck, check:all, spec snapshot",
+      "description": "Run `nub run typecheck` + `nub run check:all` green. Spec snapshot (examples/blog/spec.snapshot.json) must be unchanged. Also run npm pack --dry-run to confirm what ships. Commit work to master per implement skill.",
+      "status": "completed",
+      "activeForm": "Running full verification",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787655283731,
+      "updatedAt": 1787655338319
+    },
+    {
+      "id": "4",
+      "subject": "Spec: Type-safe method shorthands and controllable framework error responses",
+      "description": "Spec published to GitHub Issue #19: https://github.com/zfadhli/peta-hono/issues/19 with label ready-for-agent. Local file: .scratch/to-spec/SPEC-method-shorthands-and-framework-errors.md + .scratch/to-spec/issues/01-spec-type-safe-shorthands.md",
+      "status": "completed",
+      "activeForm": "Publishing spec",
+      "metadata": {
+        "triage": "ready-for-agent",
+        "label": "ready-for-agent",
+        "specPath": ".scratch/to-spec/SPEC-method-shorthands-and-framework-errors.md",
+        "githubIssue": "https://github.com/zfadhli/peta-hono/issues/19",
+        "subIssues": {
+          "01": "https://github.com/zfadhli/peta-hono/issues/20",
+          "02": "https://github.com/zfadhli/peta-hono/issues/21"
+        }
+      },
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787655400000,
+      "updatedAt": 1787655400000
+    }
+  ]
+}

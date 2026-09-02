@@ -1,0 +1,65 @@
+{
+  "nextId": 7,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Identify the exposed Generic Password",
+      "description": "Check GitGuardian secret-scanning alerts via gh api, grep pushed commits for credential-like strings (OAuth clientSecret/clientId, API tokens, .env, real keys). Determine if it's an intentional demo placeholder (replace-this-… / \"a\".repeat(32)) or a real leaked credential.",
+      "status": "completed",
+      "activeForm": "Identifying the exposed Generic Password",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1788149557677,
+      "updatedAt": 1788149768766
+    },
+    {
+      "id": "2",
+      "subject": "Rotate/invalidate real credential if genuine",
+      "description": "If a real secret leaked (OAuth client secret, API key, token), remove from code and rotate at provider. If it's a harmless demo placeholder, confirm and proceed to dismiss alert.",
+      "status": "completed",
+      "activeForm": "Rotating/invalidating real credential",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1788149557679,
+      "updatedAt": 1788149803439
+    },
+    {
+      "id": "3",
+      "subject": "Scrub secret from source/history if real",
+      "description": "If a real secret is in pushed history, plan filter-repo/bfg scrub, update docs/examples to env-var indirection, re-push. If intentional placeholder, harden with explicit comments and env-var indirection.",
+      "status": "completed",
+      "activeForm": "Scrubbing secret from source/history",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1788149557681,
+      "updatedAt": 1788149803441
+    },
+    {
+      "id": "5",
+      "subject": "Verify and commit remediation",
+      "description": "Run nub run typecheck, lint, check:all (and check:dist if dist/ changes). Commit source/doc changes to master. Do not bump version unless a real secret required a new release.",
+      "status": "completed",
+      "activeForm": "Verifying and committing remediation",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1788149557686,
+      "updatedAt": 1788149972869
+    },
+    {
+      "id": "6",
+      "subject": "Cut v0.6.2 patch release (tag + release)",
+      "description": "Bump package.json to 0.6.2, add a CHANGELOG entry describing the changes since v0.6.1 (env-var indirection for example auth secrets), commit \"chore: bump version to 0.6.2\", create annotated tag v0.6.2, and create a GitHub release. dist/ already fresh (examples-only change) — no rebuild needed.",
+      "status": "completed",
+      "activeForm": "Cutting v0.6.2 patch release",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1788221629227,
+      "updatedAt": 1788221713053
+    }
+  ]
+}

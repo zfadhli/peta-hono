@@ -1,0 +1,77 @@
+{
+  "nextId": 7,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Verify green baseline (typecheck + auth tests)",
+      "description": "Run `nub run typecheck` and `nub run check:auth` (vitest run src/auth.test.ts) to confirm the repo is green before any edits.",
+      "status": "completed",
+      "activeForm": "Verifying green baseline",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1788284613171,
+      "updatedAt": 1788284695374
+    },
+    {
+      "id": "2",
+      "subject": "Implement generateKey() helper in src/auth/jwt.ts",
+      "description": "Add an exported `generateKey()` (asymmetric keypair generator) that returns { kid, privateKey, publicJwk } ready to be wired into `keys`/`jwks`/`algorithms`. Uses crypto.subtle; supports RS256/384/512, ES256/384/512, EdDSA. Non-breaking, no new deps.",
+      "status": "completed",
+      "activeForm": "Implementing generateKey() helper",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1788284613172,
+      "updatedAt": 1788284763306
+    },
+    {
+      "id": "3",
+      "subject": "Export generateKey via auth index + barrel",
+      "description": "Re-export generateKey + its option/result types from src/auth/index.ts and src/index.ts (public barrel).",
+      "status": "completed",
+      "activeForm": "Wiring exports",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1788284613173,
+      "updatedAt": 1788284763307
+    },
+    {
+      "id": "4",
+      "subject": "Add generateKey tests to src/auth.test.ts",
+      "description": "Add a Vitest test covering generateKey → keys/jwks/algorithms wiring, a real sign/verify round-trip, and kid/alg stamping. Also verify the RS256 round-trip works with the helper (not just manual crypto.subtle).",
+      "status": "completed",
+      "activeForm": "Adding generateKey tests",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1788284613173,
+      "updatedAt": 1788284859273
+    },
+    {
+      "id": "5",
+      "subject": "Update docs (README + ponytail comment + ADR note)",
+      "description": "Document generateKey() as the asymmetric happy path in README's JWT bullet, update the ponytail comment in jwt.ts, and add a note to ADR-012/013 if appropriate. Also address the durable-store ceiling with doc guidance.",
+      "status": "completed",
+      "activeForm": "Updating docs",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1788284613174,
+      "updatedAt": 1788284915825
+    },
+    {
+      "id": "6",
+      "subject": "Full verification (typecheck/lint/check:all/check:dist) + rebuild dist",
+      "description": "Run `nub run typecheck`, `nub run lint`, `nub run check:all` (7 files/53 tests), `nub run check:dist`. Rebuild + commit dist/ if emitted JS changed.",
+      "status": "completed",
+      "activeForm": "Running full verification",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1788284613174,
+      "updatedAt": 1788285025641
+    }
+  ]
+}

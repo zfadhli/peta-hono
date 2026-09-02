@@ -1,0 +1,53 @@
+{
+  "nextId": 14,
+  "tasks": [
+    {
+      "id": "10",
+      "subject": "Bump version to 0.6.0",
+      "description": "package.json version 0.5.4 -> 0.6.0. CHANGELOG: add '## [0.6.0] - 2026-08-28' section (move [Unreleased] content under it, leave empty [Unreleased] at top).",
+      "status": "completed",
+      "activeForm": "Bumping version to 0.6.0",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787932064120,
+      "updatedAt": 1787932082962
+    },
+    {
+      "id": "11",
+      "subject": "Rebuild dist + verify check:dist/imports",
+      "description": "Run nub run build, verify dist reflects new version + new exports (createMemorySessionStore, createMemoryRefreshTokenStore, SecurityScheme). Run nub run check:dist after staging dist. Verify consumer import resolves via node -e import('./dist/index.js').",
+      "status": "completed",
+      "activeForm": "Rebuilding dist (R2 gate)",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787932064121,
+      "updatedAt": 1787932173140
+    },
+    {
+      "id": "12",
+      "subject": "Commit the release",
+      "description": "Stage package.json, CHANGELOG, README, AGENTS, docs/, src/, examples/, dist/ (never .scratch/.pi). Commit with a descriptive release message.",
+      "status": "completed",
+      "activeForm": "Committing release",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787932064127,
+      "updatedAt": 1787932173141
+    },
+    {
+      "id": "13",
+      "subject": "Tag, push, create GH release",
+      "description": "Create annotated tag v0.6.0, push master + tag to origin, create GitHub release via gh release create with notes.",
+      "status": "completed",
+      "activeForm": "Tagging + pushing + GH release",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787932064128,
+      "updatedAt": 1787932211784
+    }
+  ]
+}

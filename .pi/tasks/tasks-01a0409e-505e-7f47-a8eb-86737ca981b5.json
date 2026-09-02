@@ -1,0 +1,41 @@
+{
+  "nextId": 11,
+  "tasks": [
+    {
+      "id": "8",
+      "subject": "Bump version to 0.5.2 + changelog",
+      "description": "Bump package.json version 0.5.1 -> 0.5.2, add a Keep-a-Changelog [0.5.2] entry describing the type-safe method shorthands + framework-error docs contract work. Verify version isn't baked into dist (check:dist stays green). Commit as 'chore: bump version to 0.5.2'.",
+      "status": "completed",
+      "activeForm": "Bumping version and changelog",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787791623761,
+      "updatedAt": 1787791681745
+    },
+    {
+      "id": "9",
+      "subject": "Push master to origin",
+      "description": "Push master to origin (brings up 80a1e0c + the version bump commit).",
+      "status": "completed",
+      "activeForm": "Pushing to origin",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787791623762,
+      "updatedAt": 1787791703654
+    },
+    {
+      "id": "10",
+      "subject": "Create v0.5.2 tag + GitHub release",
+      "description": "Create annotated tag v0.5.2 on the version-bump commit (message 'Release v0.5.2'), push it, then `gh release create v0.5.2` with notes from the CHANGELOG (triggers publish.yml -> npm publish).",
+      "status": "completed",
+      "activeForm": "Creating tag and GitHub release",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1787791623768,
+      "updatedAt": 1787791779744
+    }
+  ]
+}

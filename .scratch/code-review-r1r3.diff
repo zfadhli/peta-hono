@@ -1,0 +1,2551 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index ed1a06e..99fa49b 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -28,7 +28,10 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated
+ | Blog tests | `nub examples/blog/selfcheck.ts` |
+ | Auth tests | `nub examples/auth/selfcheck.ts` |
+ | Lib tests | `nub src/openapi.selfcheck.ts` |
+-| All tests | `nub run check:all` (`lib + basic + blog + auth`) |
++| Strategy tests | `nub src/auth.selfcheck.ts` |
++| Strategies example | `nub examples/strategies/index.ts` |
++| Strategies tests | `nub examples/strategies/selfcheck.ts` |
++| All tests | `nub run check:all` (`lib + auth-strategies + basic + blog + auth + strategies`) |
+ 
+ ## Structure
+ 
+@@ -36,12 +39,15 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated
+ - `src/openapi.ts` — OpenAPIHono class (default `onError` + `notFound`), arktypeValidator, APIError, AuthScheme, createErrorHandler, OpenAPI spec emission (re-exports paths helpers)
+ - `src/api.ts` — library: createApi, api, auth, docs, fail (re-exports APIError from openapi.ts)
+ - `src/index.ts` — public barrel (re-exports all public API)
++- `src/auth/` — built-in auth strategies (session / jwt / oauth): crypto, store, cookie, session, jwt, oauth
+ - `src/openapi.selfcheck.ts` — runnable lib integration test (12 assertions)
++- `src/auth.selfcheck.ts` — runnable built-in auth strategy test (session / jwt / oauth / scheme emission / coexistence)
+ - `src/typecheck.selfcheck.ts` — type-only regression guard (tsc --noEmit; excluded from dist/ build)
+ - `examples/basic/` — single-file example app (routes.ts + index.ts + selfcheck.ts; hello, things, search, legacy)
+ - `examples/blog/` — multi-file blog API (setup.ts singleton, db.ts + schema.ts, posts.ts + comments.ts, index.ts + selfcheck.ts)
+ - `examples/blog/spec.snapshot.json` — golden OpenAPI spec for regression detection
+ - `examples/auth/` — peta-auth integration example (routes.ts + index.ts + types.d.ts + selfcheck.ts)
++- `examples/strategies/` — built-in auth strategies example (session + jwt + google oauth; routes.ts + index.ts + selfcheck.ts)
+ 
+ ## Conventions
+ 
+@@ -63,6 +69,7 @@ Function-based API DSL on Hono + ArkType. Declare endpoints with auto-generated
+ - `APIError(status, message)` for typed HTTP errors (status is `ContentfulStatusCode`)
+ - `fail` is the canonical error helper — `throw fail.notFound("...")`. `errors` / `httpErrors` are deprecated pure synonyms (still exported). The 11 named helpers (`fail.badRequest`, `fail.unauthorized`, `fail.forbidden`, `fail.notFound`, `fail.conflict`, `fail.unprocessableEntity`, `fail.tooManyRequests`, `fail.internalServerError`, `fail.badGateway`, `fail.serviceUnavailable`, `fail.gatewayTimeout`) live in `src/api.ts`.
+ - `auth(name, mw, scheme?)` registers middleware + an OpenAPI security scheme. The `scheme` arg defaults to `bearer` if omitted; every `{auth}` route is **always documented as protected** — it emits a `401` response, a `security` requirement, and the matching `components.securitySchemes` entry.
++- Built-in auth strategies (opt-in, ADR-012): `auth.session(name, opts)`, `auth.jwt(name, opts)`, `auth.oauth(name, opts)` (and `auth.strategy(name, { type, ...opts })`) register guards through the same path as `auth(name, mw, scheme?)`, so `{ auth: name }` keeps the 401 + `security` + `securitySchemes` behavior. Session = signed `sid.hmac` cookie + pluggable `SessionStore`; JWT = HS256 access tokens (Web Crypto, no dep) + opaque rotating/revocable refresh tokens; OAuth = Google authorization-code + PKCE flow. **OAuth registers only the `oauth2` scheme + mounts `/start`/`/callback`; it is NOT a request guard** — protect downstream routes with a jwt/session gate. The `/start`+`/callback` flow routes are intentionally NOT emitted in the OpenAPI `paths` (the spec emitter is JSON-body-oriented; a `302` redirect would mismatch), but the `oauth2` securitySchemes entry is. Stores default in-memory — supply a durable `SessionStore`/`RefreshTokenStore` in prod (ponytail). **Input vs emitted security-scheme type:** `AuthScheme` is the narrow `auth(name, mw, scheme?)` input (http bearer/basic, apiKey header/query — unchanged since v0.5.4); `SecurityScheme` is the wide emitted `components.securitySchemes` type (adds `apiKey` `in: "cookie"` and `oauth2` with `authorizationCode` flows).
+ - All errors — handler-thrown `APIError`, validator failures, unexpected throws — route through `app.onError` (single chokepoint). `OpenAPIHono` registers a default `onError`; `createApi()` overrides it with its own policy. The `OpenAPIHono` ctor also registers `this.notFound(...)` so an unmatched route returns `application/json {error:"Not Found"}` via the shared `createErrorHandler` policy — unifying the 404 shape with `fail.notFound()`.
+ - `arktypeValidator` throws `APIError(400, summary)` on validation failure (does not return a `Response`) so `onError` sees validation errors
+ - `createErrorHandler(debug?)` is **dev-only** — it reveals `{ error, stack }` only when `NODE_ENV` is explicitly `development` or `test`; otherwise (production, or `NODE_ENV` absent on Bun/Deno/edge) it redacts to `{"error":"Internal Server Error"}`. `createApi({ debug: true })` wires this; never rely on `NODE_ENV === "production"` (the old gate leaked when unset).
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index d423d78..13e870e 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
+ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+ 
++## [Unreleased]
++
++### Added
++
++- **Built-in auth strategies (ADR-012)** — opt-in `auth.session(name, opts)`, `auth.jwt(name, opts)`, `auth.oauth(name, opts)`, and the unified `auth.strategy(name, { type, ...opts })`. Each registers a guard through the same path as `auth(name, mw, scheme?)` (so `{ auth: name }` keeps the 401 + `security` + `securitySchemes` behavior) and returns flow helpers:
++  - **session** — signed `sid.hmac` cookie + pluggable `SessionStore` (in-memory via `createMemorySessionStore()`); helpers `create`/`destroy`/`get`/`generateCsrf`/`verifyCsrf`. `create`/`destroy` set the cookie on the context *and* return the `Set-Cookie` value for Response-returning handlers.
++  - **jwt** — HS256 access tokens (Web Crypto, no new dep) with a unique `jti`, plus opaque, hashed, rotating, single-use, family-revoked refresh tokens (in-memory via `createMemoryRefreshTokenStore()`); helpers `issue`/`refresh`/`revoke`/`verifyAccess`.
++  - **oauth (Google)** — authorization-code + PKCE flow; emits an `oauth2` security scheme and mounts `/auth/google/start` + `/auth/google/callback`; `onSuccess({ user, tokens, request, c })` is the integration point to issue a JWT or create a session; `fetchFn`/`tokenURL`/`userInfoURL` injectable for tests/proxies.
++- **Security-scheme type split** — a new `SecurityScheme` type is added for the *wide* emitted set `components.securitySchemes` (`apiKey`/`in:"cookie"` + `oauth2`/`authorizationCode`), re-exported from the barrel alongside the existing narrow `AuthScheme`. `AuthScheme` (the *input* to `auth(name, mw, scheme?)`) is UNCHANGED since v0.5.4 (`http` bearer/basic + `apiKey` header/query). **Compile-time-only break:** consumers who type `components.securitySchemes` entries (or a union over it) with `AuthScheme` must switch to `SecurityScheme`; passing a scheme to `auth()` and exhaustive switches over `AuthScheme` are unaffected.
++- **Strategies example** — `examples/strategies/` demonstrates session + jwt + google oauth in one app, wired into `check:all` and the README structure tree.
++- **Strategy self-check** — `src/auth.selfcheck.ts` (5 assertions) plus the strategies example, run via `nub run check:auth` / `nub run check:all`.
++
++### Security notes (ponytail ceilings)
++
++- JWT is **HS256 symmetric only** — no asymmetric (RS256/EdDSA) or JWKS support yet; the signing secret is a raw HMAC key.
++- Session cookies are **signed, not encrypted**, and are not `Secure` by default (set `secure: true` on https); CSRF is an opt-in double-submit token with `SameSite=Lax` as the default mitigation.
++- Default session/refresh stores are **in-memory (process-local)** — supply a durable `SessionStore`/`RefreshTokenStore` for production.
++
+ ## [0.5.4] - 2026-08-27
+ 
+ ### Changed
+diff --git a/README.md b/README.md
+index 563f51a..f060efc 100644
+--- a/README.md
++++ b/README.md
+@@ -103,7 +103,13 @@ Run with `nub index.ts` (or `node index.ts` if you've built the lib).
+   - `operationId?: string` — override auto-generated operationId (useful for SDK generation)
+   - `deprecated?: boolean` — mark operation as deprecated in spec
+   - `status?: number` — explicit success status (use 204 for No Content; handler returns `null`). When multiple 2xx/3xx codes are declared in `responses`, the default resolves to the **lowest** 2xx/3xx (JS enumerates integer-like keys in ascending order), so set `status` explicitly to get a non-lowest default
+-- **`auth(name, middleware, scheme?)`** — registers a named auth middleware. **Return-based:** `(c: Context<Env>) => Auth` — throw to reject (e.g. `throw fail.unauthorized()`), or return a value that becomes `req.auth` in handlers. Apply via `{ auth: 'name' }` in the api config. The `scheme` argument registers an OpenAPI security scheme and controls the **lock-icon kind**: `{ type: 'http', scheme: 'bearer' }`, `{ type: 'http', scheme: 'basic' }`, or `{ type: 'apiKey', in: 'header', name: 'X-API-Key' }`. **A route with `{ auth }` is always documented as protected** — it emits a `401 Unauthorized` response, a `security` requirement, and the matching `components.securitySchemes` entry — even when `auth()` was registered *without* a `scheme`. When the `scheme` arg is omitted, a default `bearer` scheme is published so the `security` requirement resolves to a real scheme (no dangling reference) and the lock icon shows.
++- **`auth(name, middleware, scheme?)`** — registers a named auth middleware. **Return-based:** `(c: Context<Env>) => Auth` — throw to reject (e.g. `throw fail.unauthorized()`), or return a value that becomes `req.auth` in handlers. Apply via `{ auth: 'name' }` in the api config. The `scheme` argument registers an OpenAPI security scheme and controls the **lock-icon kind**: `{ type: 'http', scheme: 'bearer' }`, `{ type: 'http', scheme: 'basic' }`, or `{ type: 'apiKey', in: 'header', name: 'X-API-Key' }`. **A route with `{ auth }` is always documented as protected** — it emits a `401 Unauthorized` response, a `security` requirement, and the matching `components.securitySchemes` entry — even when `auth()` was registered *without* a `scheme`. When the `scheme` arg is omitted, a default `bearer` scheme is published so the `security` requirement resolves to a real scheme (no dangling reference) and the lock icon shows. **Scheme types — narrow input vs wide emitted:** the `scheme` argument to `auth()` is typed `AuthScheme` (the stable narrow input: `http` bearer/basic + `apiKey` header/query). The library *emits* a wider set into `components.securitySchemes` — `apiKey` with `in: "cookie"` and `oauth2`/`authorizationCode` — typed `SecurityScheme`. When reading `components.securitySchemes` (e.g. from a generated spec), type it as `SecurityScheme`, not `AuthScheme`. This split is a compile-time-only change; passing a scheme to `auth()` and exhaustive switches over `AuthScheme` are unaffected.
++- **Built-in auth strategies (opt-in, no breaking change)** — `auth` also carries three strategy builders that register guards through the same path (so `{ auth: name }` keeps the 401 + `security` + `securitySchemes` behavior) and return flow helpers:
++  - `const session = auth.session('session', { secret, cookieName?, store?, csrf? })` — signed cookie (`sid.hmac`) + pluggable `SessionStore`. Helpers: `session.create(c, data)` (sets the cookie *and* returns the `Set-Cookie` value), `session.destroy(c)`, `session.get(c)`, `session.generateCsrf(c)`, `session.verifyCsrf(c, token)`.
++  - `const jwt = auth.jwt('jwt', { secret, accessTtl?, refreshTtl?, issuer?, audience?, store? })` — HS256 access tokens (Web Crypto, no extra dep) + opaque rotating refresh tokens (single-use, family-revoked on reuse). Helpers: `jwt.issue(sub, claims?)`, `jwt.refresh(refreshToken)`, `jwt.revoke(refreshToken)`, `jwt.verifyAccess(token)`.
++  - `const google = auth.oauth('google', { clientId, clientSecret?, redirectUri, scopes?, onSuccess, ... })` — Google authorization-code + PKCE flow; registers the `oauth2` security scheme and mounts `/auth/google/start` + `/auth/google/callback`. `onSuccess({ user, tokens, request, c })` is where you issue a JWT (`jwt.issue(...)`) or create a session (`session.create(c, ...)`). `tokenURL`/`userInfoURL`/`fetchFn` are injectable for tests/proxies. The `/start`+`/callback` flow routes are registered on `app` but deliberately **not** emitted in the OpenAPI `paths` (the spec emitter is JSON-body-oriented — a `302` redirect would mismatch; the `oauth2` security scheme *is* emitted).
++  - `auth.strategy(name, { type: 'session' | 'jwt' | 'oauth', ... })` — unified dispatch over the same builders.
++  - Stores are injectable: `createMemorySessionStore()` / `createMemoryRefreshTokenStore()`, or any object implementing `SessionStore` / `RefreshTokenStore` (Postgres, Redis, KV) for production. **ponytail:** default stores are in-memory (process-local).
+ - **`docs(specPath?, uiPath?)` / `docs({ specPath?, uiPath? })`** — mounts the OpenAPI JSON spec and Scalar docs UI. Both positional (`docs("/openapi.json", "/docs")`) and options-object (`docs({ specPath, uiPath })`) forms are supported.
+ - **Header schemas must use lowercase keys** — Hono lowercases incoming headers via Fetch `Headers`; declare `type({ "x-api-key": "string" })` not `type({ "X-Api-Key": "string" })`. The spec emits lowercased header param names so runtime and docs match (`_addObjectParams` lowercases when `in === "header"`).
+ - **Path params & `{regex}`** — `:name`, `:id?`, `:id{[0-9]+}` are parsed from the path and typed at the top level. **The `{regex}` in `:param{regex}` is enforced by Hono's router, not the ArkType param validator** — a mismatch produces a 404 (route doesn't match), and the ArkType schema types/validates the segment as `string`.
+@@ -121,6 +127,7 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
+ - Response schemas feed into OpenAPI output documentation
+ - Auth middleware — named, reusable, applied per-endpoint, with OpenAPI security schemes
+ - **Typed auth context** — `createApi<Auth, Env>()` + return-based `auth()` middleware propagate the authenticated user to handlers as `req.auth` with full type safety; `Env` types `req.c` (`c.var` / `c.env`)
++- **Built-in auth strategies** — session (cookie), JWT (bearer access + rotating refresh), and Google OAuth2 (authorization-code + PKCE), all opt-in and composable with the existing `{ auth: name }` gating. Emit the matching OpenAPI `securitySchemes` (`apiKey/in:cookie`, `bearer`, `oauth2/authorizationCode`). See the strategies example: `nub examples/strategies/index.ts`.
+ - **`fail` error helpers** — `throw fail.notFound('...')` for ergonomic typed HTTP errors (11 named status helpers + `APIError` for custom codes). `fail` is the canonical helper; `errors` / `httpErrors` are deprecated synonyms.
+ - **Accurate default docs** — auth-protected routes always document `401` + a `security` requirement (even when `auth()` is registered without a `scheme`, which defaults to `bearer`); the auto-documented 400 on `:param` routes can be suppressed per-route with `hide400`; `info.version` defaults to `0.0.0` not a misleading `1.0.0`
+ - **Unified 404** — unmatched routes return `application/json {error}` through the single error policy, matching `fail.notFound()`
+@@ -139,8 +146,9 @@ Handler returns a plain object (no `c.json()`). The library wraps it in the corr
+ ```
+ src/
+   openapi.ts    — OpenAPIHono class, arktypeValidator, APIError, OpenAPI spec emission
+-  api.ts        — createApi, api, auth, docs (DSL facade)
++  api.ts        — createApi, api, auth (+ strategies), docs (DSL facade)
+   paths.ts      — single source for path & method grammar (PARAM_TOKEN_RE, normalizeMethod, toOapiPath)
++  auth/         — built-in auth strategies (crypto, store, cookie, session, jwt, oauth)
+   index.ts      — public barrel (re-exports all public API)
+ examples/
+   basic/        — single-file example app
+@@ -161,6 +169,10 @@ examples/
+     index.ts      — server entry
+     types.d.ts    — typed c.var.session augmentation
+     selfcheck.ts  — runnable end-to-end test suite
++  strategies/   — built-in auth strategies example (session + jwt + google oauth)
++    routes.ts     — route definitions
++    index.ts      — server entry
++    selfcheck.ts  — runnable end-to-end test suite
+ dist/           — built output (created by `nub run build`)
+ ```
+ 
+diff --git a/docs/adr/012-built-in-auth-strategies.md b/docs/adr/012-built-in-auth-strategies.md
+new file mode 100644
+index 0000000..ef7d6df
+--- /dev/null
++++ b/docs/adr/012-built-in-auth-strategies.md
+@@ -0,0 +1,151 @@
++# ADR 012 — Built-in auth strategies (session / JWT / Google OAuth)
++
++**Date:** 2026-08-27
++**Status:** Accepted — implemented (initial pass, `src/auth/`)
++
++## Context
++
++The existing `auth(name, mw, scheme?)` takes a user-supplied middleware. It is
++powerful and composes with `{ auth: name }` gating, but it leaves the hard parts
++— cookie sessions, JWT signing + refresh rotation, and an OAuth2 code flow — to
++the caller. The goal is **built-in, reusable strategy helpers** that:
++
++- still register through the same code path, so a `{ auth: name }` route keeps
++  the existing 401 + `security` + `components.securitySchemes` behavior, and
++- are **optional** (opt-in) with no breaking change to `auth(name, mw, scheme?)`
++  or `createApi<Auth, Env>(opts)`.
++
++Three strategies are in scope: **session** (cookie), **JWT** (bearer access +
++rotating refresh), and **Google OAuth2** (authorization-code + PKCE).
++
++## Decision
++
++Non-breaking, additive. `auth` (a function) gains strategy methods; `createApi`
++keeps its signature.
++
++### Public surface
++
++```ts
++const { api, auth, docs, app } = createApi<Auth, Env>({ title, version, debug })
++
++// Named strategies (each registers under the given gate name)
++const session = auth.session("session", { secret, cookieName?, store?, csrf? })
++const jwt     = auth.jwt("jwt", { secret, accessTtl?, refreshTtl?, issuer?, audience?, store? })
++const google  = auth.oauth("google", { clientId, clientSecret?, redirectUri, scopes?, onSuccess, ... })
++
++// Unified dispatch (same builders, discriminated by `type`)
++auth.strategy("session", { type: "session", ... })
++auth.strategy("jwt",     { type: "jwt", ... })
++auth.strategy("google",  { type: "oauth", ... })
++```
++
++Each strategy returns a handle exposing its flow helpers:
++- **session**: `create(c, data)`, `destroy(c)`, `get(c)`, `generateCsrf(c)`, `verifyCsrf(c, token)`. `create`/`destroy` both set the cookie on the context *and* return the `Set-Cookie` value, so a handler returning a raw `Response` (e.g. an OAuth `onSuccess`) can attach it.
++- **jwt**: `issue(sub, claims?)`, `refresh(refreshToken)`, `revoke(refreshToken)`, `verifyAccess(token)`.
++- **oauth**: `authorizeUrl(state, codeChallenge?)`, `exchangeCode(code, verifier?)`, `getUser(tokens)`, `mount(app)` (registers `/start` + `/callback`).
++
++### Registration model
++
++Session/JWT strategies have a guard middleware and are registered exactly like a
++hand-written `auth(name, mw, scheme)` (so `{ auth: name }` works and is
++documented protected). OAuth is a **flow**, not a request guard: its strategy
++registers the `oauth2` security scheme (for `components.securitySchemes`) and
++mounts the `/start` + `/callback` routes directly on `app`; downstream protected
++routes use a `jwt`/`session` gate. Public store adapters
++(`createMemorySessionStore` / `createMemoryRefreshTokenStore`) and the store
++interfaces are exported so callers can supply a durable store.
++
++### Security-scheme type split — narrow input vs wide emitted
++
++To avoid breaking consumers who exhaustively switch on the `auth()` input type,
++`AuthScheme` (the narrow input) is left unchanged, and the wide emitted set grows
++as a separate `SecurityScheme`:
++
++```ts
++// Input to auth(name, mw, scheme?) — stable since v0.5.4
++export type AuthScheme =
++  | { type: "http"; scheme: "bearer" | "basic" }
++  | { type: "apiKey"; in: "header" | "query"; name: string };
++
++// Emitted for components.securitySchemes — adds the built-in-strategy kinds
++export type SecurityScheme =
++  | AuthScheme
++  | { type: "apiKey"; in: "cookie"; name: string }
++  | { type: "oauth2"; flows: OAuth2Flows };
++```
++
++### JWT — homegrown HS256, no dependency
++
++Access tokens are compact JWS (HS256) signed with a shared secret via Web Crypto
++(`crypto.subtle`), portable to Node/Bun/Deno/edge — no new dependency, mirroring
++the existing `sha1Hex` Web Crypto use. Each access token carries a unique `jti`.
++Refresh tokens are **opaque, server-stored (hashed with SHA-256), rotated on
++every refresh, single-use**, and **family-revoked on reuse** (a replayed rotated
++token revokes the whole family → 401). The refresh store implements
++`RefreshTokenStore` (default in-memory; supply a durable one in prod).
++
++### Session — signed cookie, pluggable store, opt-in CSRF
++
++The session id travels in a signed cookie (`sid.hmac`), the payload lives in a
++`SessionStore`. `SameSite=Lax` is the default mitigation; CSRF is opt-in
++double-submit via an in-session token validated against a header. The cookie is
++**not** generated `Secure` by default (dev over http) — set `secure: true`.
++
++### OAuth — authorization-code + PKCE, injection point is `onSuccess`
++
++`/start` builds a `state` (+ PKCE `code_verifier`) and stores both in a short-lived,
++signed, HttpOnly cookie, then redirects to the provider. `/callback` validates
++`state` against the cookie, exchanges the code (with `code_verifier`), fetches
++the user profile, calls `onSuccess({ user, tokens, request, c })`, and clears the
++state cookie. `tokenURL`/`userInfoURL`/`fetchFn` are injectable for tests and
++proxies; `onSuccess` is where you issue a JWT or create a session.
++
++## Alternatives considered
++
++- **Extend `auth(name, mw, scheme?)` for each strategy** — forces the strategy's
++  guard + flow helpers into a single callback signature; struggles to expose
++  `create`/`issue`/`refresh` helpers. Rejected: the existing signature is a pure
++  guard; strategies need both a guard and flow helpers.
++- **Add a dependency for JWT (`jose`, `jsonwebtoken`)** — `jose` is ESM + ts-friendly
++  but pulls a dependency tree and type surface into a library that is deliberately
++  thin and runtime-portable. Web Crypto HS256 covers the requirement at zero
++  dependency cost. Rejected: keep the tree light; documented ceiling (RS256/JWKS).
++- **Wire OAuth to automatically issue a JWT/session** — couples the strategies and
++  hides the integration point. Rejected: `onSuccess` keeps the strategies
++  composable and lets the caller decide (issue JWT *or* session *or* both).
++
++## Consequences
++
++- **Migration:** additive. Existing `auth(name, mw, scheme?)`, `createApi`, the
++  `AuthScheme` http/apiKey cases, and every example are unchanged. New exports
++  (strategy types + store creators) come from the `src/auth/` module and the
++  barrel. `AuthScheme` (the narrow `auth()` input) is unchanged since v0.5.4; the
++  wide emitted set (`apiKey`/`in:"cookie"`, `oauth2`) lives in the new
++  `SecurityScheme`. The widening is compile-time-only and affects only consumers
++  who read `components.securitySchemes` with `AuthScheme` — they should switch to
++  `SecurityScheme`.
++- **Testing:** `src/auth.selfcheck.ts` (5 assertions) covers session
++  create/lookup/logout, JWT issue/verify/rotate/reuse-revoke, OAuth mocked
++  start/callback with PKCE, OpenAPI scheme emission, and multi-strategy
++  coexistence. `examples/strategies/` runs them over a real server with a cookie
++  jar. Wired into `check:all`.
++- **ponytail ceilings:** HS256 only (no RS256/JWKS yet); session cookies are
++  signed not encrypted; in-memory stores are process-local; OAuth `onSuccess` is
++  the only integration point (no auto-refresh wiring).
++- **Flow routes are deliberately omitted from the OpenAPI `paths`.** `/start` and
++  `/callback` are registered via `app.get` (a browser redirect/RT exchange, not a
++  JSON operation). Forcing them through `app.openapi` would make `_buildResponses`
++  declare a `200 "Success"` body for what is actually a `302` redirect (the spec
++  emitter maps any non-204 code to a JSON body), a spec/runtime mismatch that
++  violates the library's spec-accuracy invariant. The `oauth2` security scheme IS
++  emitted to `components.securitySchemes`; the flow route *paths* are not. Revisit
++  if a truthful `No Content`/redirect response is added to the emitter.
++- **Docs:** glossary + domain-model updated; `examples/strategies/` added to the
++  README structure tree; `AGENTS.md` commands/structure/key-patterns updated.
++
++## References
++
++- `src/auth/*` — crypto, store, cookie, session, jwt, oauth strategies
++- `src/api.ts` — `registerAuth` + `auth.session/jwt/oauth/strategy` wiring
++- `src/openapi.ts` — `AuthScheme` extension
++- `src/auth.selfcheck.ts`, `examples/strategies/` — tests
+diff --git a/docs/adr/README.md b/docs/adr/README.md
+index 0cb0108..de93908 100644
+--- a/docs/adr/README.md
++++ b/docs/adr/README.md
+@@ -13,6 +13,7 @@
+ | 009 | Method shorthands, Method typing, operationId/deprecated, Env generic (v0.5.0) | 2026-08-26 | Accepted |
+ | 010 | Extract `PARAM_TOKEN_RE` and share param parsing | 2026-08-26 | Accepted — implemented |
+ | 011 | Split `src/openapi.ts` by responsibility (deferred incremental) | 2026-08-26 | Proposed |
++| 012 | Built-in auth strategies (session / JWT / Google OAuth) | 2026-08-27 | Accepted — implemented |
+ 
+ Glossary: [`../glossary.md`](../glossary.md)
+ Domain model: [`../domain-model.md`](../domain-model.md) (canonical) · [`../../.scratch/grill-with-docs/domain-model.md`](../../.scratch/grill-with-docs/domain-model.md) (grill archive)
+diff --git a/docs/domain-model.md b/docs/domain-model.md
+index 9bfaa56..8b2174e 100644
+--- a/docs/domain-model.md
++++ b/docs/domain-model.md
+@@ -26,7 +26,7 @@
+ | **B. Validation & Coercion** | `ArktypeValidator`, `Coercion` | `src/validation.ts` | `coerceDeep/coerceValue`, `arktypeValidator` (throws `APIError(400)`) | `errors` (kernel), `ArkType` |
+ | **C. Routing & Paths** | `ParamToken`, `OapiPath`, `NormalizedMethod` | `src/paths.ts` | `PARAM_TOKEN_RE`, `parseParamTokens`, `toOapiPath`, `normalizeMethod`, `SUPPORTED_METHODS` | none (pure) |
+ | **D. Spec & Registry** | `ComponentRegistry`, `Stable hash`, `RewriteRefs` | `src/registry.ts` | `sha1Hex`, `rewriteRefs`, `schemaToOA`, `getErrorSchemaRef`, `ComponentRegistry` | `errors` (for JsonSchema type) |
+-| **E. Auth & Security** | `AuthScheme`, `SecurityRequirement` | split `api.ts` + `openapi.ts` (`registerSecurityScheme`) | `auth()` maps, `components.securitySchemes` | `paths` |
++| **E. Auth & Security** | `AuthScheme`, `SecurityRequirement` | `src/api.ts` + `src/openapi.ts` (`registerSecurityScheme`) + new `src/auth/` (built-in strategies: session / jwt / oauth) | `auth()` maps, strategy handles, `components.securitySchemes` | `paths`, `openapi` (AuthScheme) |
+ | **Kernel. Error & Lifecycle** | `APIError`, `ErrorHandler`, `fail` | `src/errors.ts` | `APIError`, `createErrorHandler(debug?)`, `fail/errors/httpErrors` | none |
+ 
+ **Invariant:** dependency direction is `A → C, E, Kernel` and `C(orchestrator) → B, C, D, Kernel`. Never `B → C` or `D → A` (acyclic).
+@@ -71,6 +71,7 @@ Source of truth for naming; ADRs reference these terms. See `docs/glossary.md` f
+ |-----|-------|--------|-------------------|
+ | [010](./adr/010-extract-param-token-re.md) | Extract `PARAM_TOKEN_RE` and share param parsing | **Accepted — implemented** | Single `src/paths.ts` constant + `parseParamTokens(path)` + re-exports; delete duplicated `matchAll` in `api.ts`/`openapi.ts`. |
+ | [011](./adr/011-split-openapi-by-responsibility.md) | Split `src/openapi.ts` by responsibility | **Proposed — deferred incremental** | Do **not** big-bang split at 700 LOC; extract `paths.ts` + `errors.ts` now, `validation.ts` next, defer `registry.ts` until >800 LOC / second divergent change. Justify: orchestration cohesion outweighs SRP cost today. |
++| [012](./adr/012-built-in-auth-strategies.md) | Built-in auth strategies (session / JWT / Google OAuth) | **Accepted — implemented** | New `src/auth/` module: additive `auth.session/jwt/oauth/strategy` builders that register through the same `auth(name,mw,scheme?)` path; `AuthScheme` widened (cookie apiKey + oauth2); JWT is homegrown HS256 via Web Crypto; session is signed-cookie + pluggable store; OAuth is an authorization-code + PKCE flow with `onSuccess` as the only integration point. All opt-in, no breaking change. |
+ 
+ Full ADRs: `docs/adr/010-*.md`, `docs/adr/011-*.md`.
+ 
+diff --git a/docs/glossary.md b/docs/glossary.md
+index 6ecc47b..df96e46 100644
+--- a/docs/glossary.md
++++ b/docs/glossary.md
+@@ -16,13 +16,20 @@ Ubiquitous language for the DSL, validation, OpenAPI, auth, and error contexts.
+ | **AuthField** | DSL (type) | Conditional `{auth:Auth}` present only when `Auth≠undefined`. Controls `req.auth` presence. |
+ | **ApiMethodHelper** | DSL (type) | Explicit shorthand helper `type ApiMethodHelper<Auth,E> = { <P,B,Q,H>(path, config & {auth?:undefined}, handler: ReqFor)=>void; <P,B,Q,H>(path, config & {auth:string}, handler: ReqFor & AuthField<Auth>)=>void }`. Not `ReturnType<typeof makeMethodHelper>` — preserves both overloads so `createApi<undefined>` → `api.get("/x", {auth:"required"}, ({auth})=>...)` errors (handler `auth` missing). Fixed grilling 02; see ADR-009. |
+ | **AuthRegistration** | Auth | `Map<string,MiddlewareHandler>` entry from `auth(name,(c:Context<E>)=>Auth,scheme?)` — wraps return-based fn via `c.set("auth",ctx)`. |
+-| **AuthScheme** | Auth / OpenAPI | Union `http bearer/basic` or `apiKey {in,name}`. Emitted to `components.securitySchemes`; drives Scalar lock icons. When `auth(name,mw)` is registered WITHOUT a `scheme`, a default `{type:"http",scheme:"bearer"}` is published (issue #03) so a `{auth}` route is always documented protected. |
++| **AuthScheme** | Auth / OpenAPI | NARROW security-scheme input to `auth(name, mw, scheme?)` — union `http bearer/basic` or `apiKey {in:`header`|`query`, name}` (unchanged since v0.5.4). When `auth(name,mw)` is registered WITHOUT a `scheme`, a default `{type:"http",scheme:"bearer"}` is published (issue #03) so a `{auth}` route is always documented protected. Keeping it narrow means an exhaustive switch over it stays valid even as the library emits more scheme kinds. |
++| **SecurityScheme** | Auth / OpenAPI | WIDE emitted type of `components.securitySchemes` — `AuthScheme | apiKey {in:`cookie`, name} | oauth2 {flows.authorizationCode}`. Use it when *reading* the emitted spec; use `AuthScheme` when *passing* a scheme to `auth()`. |
++| **AuthStrategy** | Auth | Handle returned by `auth.session/jwt/oauth/strategy(name, opts)` — groups a guard middleware (optional), an OpenAPI scheme, and flow helpers. Strategies are opt-in and register through the same path as `auth(name,mw,scheme?)`. |
++| **SessionStrategy** | Auth | Cookie-session strategy: signed `sid.hmac` cookie + pluggable `SessionStore`; guard yields the session payload as `req.auth`. Helpers: `create(c,data)` (sets cookie AND returns the `Set-Cookie` value), `destroy(c)`, `get(c)`, `generateCsrf(c)`, `verifyCsrf(c, token)`. |
++| **JwtStrategy** | Auth | HS256 access-token + opaque rotating refresh-token strategy; guard verifies the `Bearer` access token. Helpers: `issue(sub,claims?)`, `refresh(refreshToken)`, `revoke(refreshToken)`, `verifyAccess(token)`. Refresh tokens are single-use & family-revoked on reuse. |
++| **OAuthStrategy** | Auth | Google authorization-code + PKCE flow; emits an `oauth2` scheme, mounts `/start`+`/callback`. Helpers: `authorizeUrl(state, codeChallenge?)`, `exchangeCode(code, verifier?)`, `getUser(tokens)`, `mount(app)`. `onSuccess` is the only integration point. |
++| **SessionStore** | Auth | `get/set/delete(sid)` abstraction for the session payload. In-memory adapter: `createMemorySessionStore()`. |
++| **RefreshTokenStore** | Auth | `get/save/delete/getFamily/deleteFamily()` abstraction keyed by token hash. In-memory adapter: `createMemoryRefreshTokenStore()`. |
+ | **ArkType** | Validation | `Type<any,any>` alias with callable validation `schema(data)=>data\|ArkErrors` and `toJsonSchema()`. Peer dep `arktype@^2.2.1`. |
+ | **ArktypeValidator** | Validation | `validator(target, fn)` middleware factory that runs `coerceDeep` then `schema(data)` and **throws `APIError(400)`** on `ArkErrors` (never returns `Response`). |
+ | **Coercion** | Validation | `coerceDeep(schema,data)`/`coerceValue(prop,raw,defs)` deep walk via `JsonSchema` translating query/header strings → numbers/booleans/arrays before validation; preserves `undefined`/empty-string for 400. Handles nested objects, `number[]` single-wrap, `boolean "true"/"false"` strictly. **Header invariant:** Hono lowercases incoming header keys via Fetch `Headers`; `coerceDeep` does NOT auto-lowercase — declare `type({ "x-api-key": "string" })` not `"X-Api-Key"` (strict fail-fast 400). Proposed `src/validation.ts`. |
+ | **OapiPath** | OpenAPI | OpenAPI form `/{param}` derived via `toOapiPath(path)` — `:x`→`{x}`, `:x{regex}`→`{x}`, `:x?`→`{x}`, `*`→`{wildcard}`. `src/paths.ts` pure; header lowercasing is NOT here (see Coercion/ArktypeValidator ponytail — `_addObjectParams`). Used as `paths` key. |
+ | **OperationId** | OpenAPI | Unique per operation; default `method_oapiPath` (`/`→`_`, `{}` stripped). Custom via `config.operationId`; dedup suffix `_2`,`_3` via `seenOperationIds:Set` + `baseCounts:Map`. |
+-| **ComponentRegistry** | OpenAPI | `{schemas:Map<string,JsonSchema>, securitySchemes:Map<string,AuthScheme>}` hoisting `$defs` to stable names. |
++| **ComponentRegistry** | OpenAPI | `{schemas:Map<string,JsonSchema>, securitySchemes:Map<string,SecurityScheme>}` hoisting `$defs` to stable names. |
+ | **Stable hash name** | OpenAPI | `schema_<sha1Hex(normalizeRefs(JSON.stringify(def))).slice(0,12)>` — content-hash over normalized structure, not ArkType counter `intersection216`. Via Web Crypto SHA-1. |
+ | **RewriteRefs** | OpenAPI | Recursive in-place `#/$defs/X` → `#/components/schemas/schema_<hash>` rewriting (`rewriteRefs(node,rename)`). Handles objects + arrays. |
+ | **DocsMount** | OpenAPI | `docs(specPath,uiPath)` binding — `app.doc(specPath,{openapi:"3.0.0",info})` + `app.get(uiPath, apiReference({spec:{url:specPath}}))`. Overload `(specPath?,uiPath?)` or `({specPath?,uiPath?})`. The spec builds **lazily** on the `/openapi.json` request; what matters for correctness is **route registration order** (Hono matches in order), so call `docs()` after route imports for clarity. |
+diff --git a/examples/strategies/index.ts b/examples/strategies/index.ts
+new file mode 100644
+index 0000000..6739dea
+--- /dev/null
++++ b/examples/strategies/index.ts
+@@ -0,0 +1,8 @@
++import { serve } from "@hono/node-server";
++import { app } from "./routes.js";
++
++serve(app, (info) => {
++  console.log(`Strategies API → http://localhost:${info.port}`);
++  console.log(`Docs (Scalar) → http://localhost:${info.port}/docs`);
++  console.log(`OpenAPI spec → http://localhost:${info.port}/openapi.json`);
++});
+diff --git a/examples/strategies/routes.ts b/examples/strategies/routes.ts
+new file mode 100644
+index 0000000..160fee6
+--- /dev/null
++++ b/examples/strategies/routes.ts
+@@ -0,0 +1,173 @@
++import { type } from "arktype";
++import { createApi, fail } from "../../src/index.js";
++
++/**
++ * Demonstrates the three built-in auth strategies in one app:
++ *   - session (cookie)      → `/auth/me`, `/auth/logout`
++ *   - jwt (bearer + refresh)→ `/auth/token`, `/auth/refresh`, `/auth/verify`
++ *   - google oauth2 (flow)  → `/auth/google/start`, `/auth/google/callback`
++ *
++ * The strategies compose with the existing `{ auth: name }` route gating: each
++ * guard is registered exactly like a hand-written `auth(name, mw, scheme)` and
++ * gets the same OpenAPI 401 + `security` + `securitySchemes` treatment.
++ *
++ * ponytail: OAuth's token/userinfo endpoints are mocked via an injected
++ * `fetchFn` (a real app points at Google and keeps `clientSecret` server-side).
++ * The demo user is a fixed map — plug in a DB for production.
++ */
++
++const users = new Map<string, { id: string; email: string }>([
++  ["alice@example.com", { id: "u_alice", email: "alice@example.com" }],
++]);
++
++const { api, auth, docs, app } = createApi<{ userId?: string; email?: string; sub?: string }>({
++  title: "Strategies API",
++  version: "1.0.0",
++});
++
++// --- Session strategy (cookie) ---
++const session = auth.session("session", {
++  secret: "replace-this-32-byte-session-secret!!",
++  cookieName: "sid",
++  csrf: false,
++});
++
++// --- JWT strategy (bearer access + rotating refresh) ---
++const jwt = auth.jwt("jwt", {
++  secret: "replace-this-32-byte-jwt-secret!!",
++  issuer: "strategies-example",
++  audience: "api",
++  accessTtl: 900,
++  refreshTtl: 2592000,
++});
++
++// --- Google OAuth2 (authorization-code flow) ---
++// ponytail: mock endpoints so the example runs without real Google creds. A real
++// app passes clientId/clientSecret/redirectUri and omits fetchFn.
++auth.oauth("google", {
++  clientId: "example-client-id",
++  clientSecret: "example-client-secret",
++  redirectUri: "http://localhost:3000/auth/google/callback",
++  scopes: ["openid", "email", "profile"],
++  usePKCE: true,
++  tokenURL: "https://mock.example/token",
++  userInfoURL: "https://mock.example/userinfo",
++  // Demo mock — real apps omit `fetchFn` and point at Google (server-side secret).
++  fetchFn: async (input, init) => {
++    const url =
++      typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
++    if (url.includes("/token")) {
++      void init;
++      return new Response(
++        JSON.stringify({
++          access_token: "mock_access",
++          id_token: "mock_id",
++          expires_in: 3600,
++          token_type: "Bearer",
++        }),
++        { status: 200, headers: { "content-type": "application/json" } },
++      );
++    }
++    if (url.includes("/userinfo")) {
++      return new Response(
++        JSON.stringify({ sub: "google-123", email: "alice@example.com", email_verified: true }),
++        { status: 200, headers: { "content-type": "application/json" } },
++      );
++    }
++    return new Response("not found", { status: 404 });
++  },
++  onError: (err) =>
++    new Response(JSON.stringify({ error: err.message }), {
++      status: 400,
++      headers: { "content-type": "application/json" },
++    }),
++  onSuccess: async ({ user, c }) => {
++    // Demo: issue a session for the returning user (or issue a JWT via jwt.issue()).
++    // session.create(...) returns the `Set-Cookie` value — attach it because this
++    // handler returns a raw Response (a plain `c.header()` would be dropped).
++    const email = typeof user.email === "string" ? user.email : "";
++    const sub = typeof user.sub === "string" ? user.sub : "";
++    const cookie = await session.create(c, { userId: sub, email });
++    const res = new Response(JSON.stringify({ email, sub }), {
++      status: 200,
++      headers: { "content-type": "application/json" },
++    });
++    res.headers.append("Set-Cookie", cookie);
++    return res;
++  },
++});
++
++// --- Public ---
++
++api.get("/health", { tags: ["System"] }, async () => ({ ok: true }));
++
++// --- Session routes ---
++
++api.post(
++  "/auth/login",
++  {
++    tags: ["Auth"],
++    summary: "Log in (session)",
++    body: type({ email: "string", password: "string" }),
++    responses: { 200: type({ email: "string" }) },
++  },
++  async ({ body, c }) => {
++    const user = users.get(body.email);
++    // ponytail: demo password is "password" — verify a real hash in production.
++    if (!user || body.password !== "password") throw fail.unauthorized("Invalid credentials");
++    await session.create(c, { userId: user.id, email: user.email });
++    return { email: user.email };
++  },
++);
++
++api.get(
++  "/auth/me",
++  { auth: "session", tags: ["Auth"], summary: "Current session user" },
++  async ({ auth }) => ({ id: auth.userId, email: auth.email }),
++);
++
++api.post(
++  "/auth/logout",
++  { auth: "session", status: 204, tags: ["Auth"], summary: "Destroy session" },
++  async ({ c }) => {
++    await session.destroy(c);
++    return null;
++  },
++);
++
++// --- JWT routes ---
++
++api.post(
++  "/auth/token",
++  { tags: ["Auth"], summary: "Issue access + refresh token", body: type({ email: "string" }) },
++  async ({ body }) => {
++    const user = users.get(body.email);
++    if (!user) throw fail.unauthorized("Unknown user");
++    return jwt.issue(user.id);
++  },
++);
++
++api.post(
++  "/auth/refresh",
++  {
++    tags: ["Auth"],
++    summary: "Rotate a refresh token",
++    body: type({ refreshToken: "string" }),
++    responses: {
++      200: type({ accessToken: "string", refreshToken: "string", expiresIn: "number" }),
++    },
++  },
++  async ({ body }) => jwt.refresh(body.refreshToken),
++);
++
++api.get(
++  "/auth/verify",
++  { auth: "jwt", tags: ["Auth"], summary: "Verify the bearer access token" },
++  async ({ auth }) => ({ sub: auth.sub }),
++);
++
++// --- Mount OpenAPI docs ---
++
++docs({ specPath: "/openapi.json", uiPath: "/docs" });
++
++export { app };
+diff --git a/examples/strategies/selfcheck.ts b/examples/strategies/selfcheck.ts
+new file mode 100644
+index 0000000..a7420e3
+--- /dev/null
++++ b/examples/strategies/selfcheck.ts
+@@ -0,0 +1,159 @@
++// ponytail: no test framework — runnable self-check with asserts.
++// Boots the strategies example on a random port and exercises the session,
++// jwt, and Google OAuth strategies end-to-end (OAuth endpoints are mocked in
++// routes.ts via an injected fetchFn).
++
++import { createAdaptorServer } from "@hono/node-server";
++import { app } from "./routes.js";
++
++const failures: string[] = [];
++
++function assert(condition: boolean, label: string) {
++  if (!condition) failures.push(label);
++}
++
++const server = createAdaptorServer({ fetch: app.fetch });
++const port = await new Promise<number>((resolve) => {
++  server.listen(0, () => {
++    const addr = server.address();
++    resolve(typeof addr === "object" && addr ? addr.port : 0);
++  });
++});
++const baseUrl = `http://localhost:${port}`;
++
++// Cookie jar — tracks a single session cookie name/value across requests.
++let cookie = "";
++
++function setCookieFrom(res: Response): void {
++  const sc = res.headers.get("set-cookie");
++  if (!sc) return;
++  const first = sc.split(";")[0]!;
++  const eq = first.indexOf("=");
++  // If the value is empty (e.g. a cleared cookie), drop the entry from the jar.
++  if (first.slice(eq + 1) === "") cookie = "";
++  else cookie = first;
++}
++
++async function req(path: string, options?: RequestInit) {
++  const headers = new Headers(options?.headers);
++  if (cookie) headers.set("Cookie", cookie);
++  const res = await fetch(`${baseUrl}${path}`, { ...options, headers });
++  setCookieFrom(res);
++  return res;
++}
++
++try {
++  // 1. Health (public)
++  const r0 = await fetch(`${baseUrl}/health`);
++  assert(r0.status === 200, "health status");
++
++  // 2. Session login → set sid cookie
++  const r1 = await req("/auth/login", {
++    method: "POST",
++    headers: { "content-type": "application/json" },
++    body: JSON.stringify({ email: "alice@example.com", password: "password" }),
++  });
++  const j1: any = await r1.json();
++  assert(r1.status === 200, "login status");
++  assert(cookie.startsWith("sid="), "login set sid cookie");
++  assert(j1.email === "alice@example.com", "login email");
++
++  // 3. Session me (cookie) → context flows
++  const r2 = await req("/auth/me");
++  const j2: any = await r2.json();
++  assert(r2.status === 200, "me status");
++  assert(j2.email === "alice@example.com", "me email");
++
++  // 4. Session me without cookie → 401
++  const r4 = await fetch(`${baseUrl}/auth/me`);
++  assert(r4.status === 401, "me without cookie 401");
++
++  // 5. Logout clears the sid cookie
++  const r5 = await req("/auth/logout", { method: "POST" });
++  assert(r5.status === 204, "logout status");
++  assert(cookie === "", "logout cleared cookie");
++
++  // 6. JWT token issue + verify + refresh
++  const r6 = await req("/auth/token", {
++    method: "POST",
++    headers: { "content-type": "application/json" },
++    body: JSON.stringify({ email: "alice@example.com" }),
++  });
++  const j6: any = await r6.json();
++  assert(r6.status === 200, "token issue status");
++  assert(typeof j6.accessToken === "string", "access token type");
++
++  const r7 = await fetch(`${baseUrl}/auth/verify`, {
++    headers: { authorization: `Bearer ${j6.accessToken}` },
++  });
++  const j7: any = await r7.json();
++  assert(r7.status === 200, "verify status");
++  assert(j7.sub === "u_alice", "verify sub");
++
++  const r8 = await req("/auth/refresh", {
++    method: "POST",
++    headers: { "content-type": "application/json" },
++    body: JSON.stringify({ refreshToken: j6.refreshToken }),
++  });
++  const j8: any = await r8.json();
++  assert(r8.status === 200, "refresh status");
++  assert(j8.refreshToken !== j6.refreshToken, "refresh rotates token");
++
++  // 7. Reuse of the rotated refresh token → 401 (family revoked)
++  const r9 = await req("/auth/refresh", {
++    method: "POST",
++    headers: { "content-type": "application/json" },
++    body: JSON.stringify({ refreshToken: j6.refreshToken }),
++  });
++  assert(r9.status === 401, "refresh reuse 401");
++
++  // 8. Google OAuth start → 302 + state cookie
++  const r10 = await fetch(`${baseUrl}/auth/google/start`, { redirect: "manual" });
++  const loc = r10.headers.get("location") ?? "";
++  assert(r10.status === 302, "oauth start 302");
++  assert(loc.includes("client_id=example-client-id"), "oauth start client_id");
++  assert(loc.includes("code_challenge="), "oauth start PKCE");
++  const url = new URL(loc);
++  const state = url.searchParams.get("state") ?? "";
++  assert(state.length > 0, "oauth start state");
++  assert(
++    (r10.headers.get("set-cookie") ?? "").split(";")[0]!.startsWith("oauth_state="),
++    "oauth start state cookie",
++  );
++
++  // 9. OAuth callback (mock endpoints) → onSuccess runs, session cookie set
++  const r11 = await fetch(
++    `${baseUrl}/auth/google/callback?code=mock_code&state=${encodeURIComponent(state)}`,
++    { headers: { cookie: r10.headers.get("set-cookie")?.split(";")[0] ?? "" } },
++  );
++  const j11: any = await r11.json();
++  assert(r11.status === 200, "oauth callback status");
++  assert(j11.email === "alice@example.com", "oauth callback email");
++  assert((r11.headers.get("set-cookie") ?? "").includes("sid="), "oauth callback sets session");
++
++  // 10. OAuth-issued session works on a protected route
++  const jar = (r11.headers.get("set-cookie") ?? "").split(";")[0]!.startsWith("sid=")
++    ? (r11.headers.get("set-cookie") ?? "").split(";")[0]!
++    : "";
++  const r12 = await fetch(`${baseUrl}/auth/me`, { headers: { cookie: jar } });
++  assert(r12.status === 200, "oauth session me status");
++
++  // 11. OpenAPI spec documents all three security schemes
++  const r13 = await fetch(`${baseUrl}/openapi.json`);
++  const spec: any = await r13.json();
++  const schemes = spec.components?.securitySchemes ?? {};
++  assert(schemes.session?.in === "cookie", "spec session in:cookie");
++  assert(schemes.jwt?.scheme === "bearer", "spec jwt bearer");
++  assert(schemes.google?.type === "oauth2", "spec google oauth2");
++  assert(spec.paths?.["/auth/verify"]?.get?.responses?.["401"], "spec verify 401");
++} finally {
++  server.close();
++}
++
++if (failures.length > 0) {
++  console.error(`FAILED: ${failures.length} test(s)`);
++  for (const f of failures) console.error(`  ✗ ${f}`);
++  process.exit(failures.length);
++} else {
++  console.log("All strategies self-checks passed ✓");
++}
+diff --git a/package.json b/package.json
+index b0644e2..352e635 100644
+--- a/package.json
++++ b/package.json
+@@ -36,7 +36,10 @@
+     "check": "nub examples/basic/selfcheck.ts",
+     "blog": "nub examples/blog/index.ts",
+     "blog:check": "nub examples/blog/selfcheck.ts",
+-    "check:all": "nub src/openapi.selfcheck.ts && nub examples/basic/selfcheck.ts && nub examples/blog/selfcheck.ts && nub examples/auth/selfcheck.ts",
++    "check:all": "nub src/openapi.selfcheck.ts && nub src/auth.selfcheck.ts && nub examples/basic/selfcheck.ts && nub examples/blog/selfcheck.ts && nub examples/auth/selfcheck.ts && nub examples/strategies/selfcheck.ts",
++    "check:auth": "nub src/auth.selfcheck.ts",
++    "strategies": "nub examples/strategies/index.ts",
++    "strategies:check": "nub examples/strategies/selfcheck.ts",
+     "typecheck": "tsc --noEmit",
+     "lint": "biome check src/ examples/",
+     "lint:fix": "biome check --write --unsafe src/ examples/",
+diff --git a/src/api.ts b/src/api.ts
+index dc3da23..fed0a97 100644
+--- a/src/api.ts
++++ b/src/api.ts
+@@ -1,12 +1,35 @@
+ import { apiReference } from "@scalar/hono-api-reference";
+ import { type Type, type } from "arktype";
+ import type { Context, Env, MiddlewareHandler } from "hono";
+-import { APIError, type AuthScheme, createErrorHandler, OpenAPIHono } from "./openapi.js";
++import {
++  type AuthStrategySpec,
++  buildAuthStrategy,
++  buildJwtStrategy,
++  buildOAuthStrategy,
++  buildSessionStrategy,
++  type FlowApp,
++  type JwtStrategy,
++  type JwtStrategyOptions,
++  type OAuthStrategy,
++  type OAuthStrategyOptions,
++  type SessionStrategy,
++  type SessionStrategyOptions,
++  type StrategyFor,
++} from "./auth/index.js";
++import {
++  APIError,
++  type AuthScheme,
++  createErrorHandler,
++  OpenAPIHono,
++  type SecurityScheme,
++} from "./openapi.js";
+ import { type Method, normalizeMethod, parseParamTokens } from "./paths.js";
+ 
+ export type { HttpMethod, Method } from "./paths.js";
+-// Re-export AuthScheme so consumers can import it from api.ts as before
+-export type { AuthScheme };
++// Re-export AuthScheme (narrow input) + SecurityScheme (wide emitted) so
++// consumers can import them from api.ts as before. AuthScheme is what you pass
++// to auth(); SecurityScheme is what the library emits for securitySchemes.
++export type { AuthScheme, SecurityScheme };
+ // Re-export APIError (defined in openapi.ts) so the public barrel keeps a
+ // stable shape via api.ts. See issue #4: APIError moved to openapi.ts so the
+ // validator can throw it without a circular import.
+@@ -182,27 +205,83 @@ export function createApi<Auth = undefined, E extends Env = Env>(
+   app.onError(createErrorHandler(opts.debug));
+ 
+   const auths = new Map<string, MiddlewareHandler>();
+-  const authSchemes = new Map<string, AuthScheme>();
+-
+-  function auth(name: string, mw: (c: Context<E>) => Promise<Auth> | Auth, scheme?: AuthScheme) {
++  const authSchemes = new Map<string, SecurityScheme>();
++
++  // Shared registration used by both the public `auth()` and the built-in
++  // strategies. Every registered auth is ALWAYS documented as protected: a
++  // route with `{auth}` emits 401 + a `security` requirement. The optional
++  // `scheme` only controls the lock-icon KIND; when omitted we publish a
++  // default bearer scheme so the `security` requirement still resolves to a
++  // real `components.securitySchemes` entry (no dangling ref, lock icon shows).
++  // Internal: accepts the wide `SecurityScheme` (the built-in strategies need
++  // cookie/oauth2); the public `auth()` narrows its own `scheme` to `AuthScheme`.
++  function registerAuth(
++    name: string,
++    mw: (c: Context) => Promise<unknown> | unknown,
++    scheme?: SecurityScheme,
++  ) {
+     // Wrap the return-based auth fn into a Hono middleware that stores the
+     // auth context on c for the handler wrapper to read via c.get('auth').
+     const wrapped: MiddlewareHandler = async (c, next) => {
+-      const ctx = await mw(c as Context<E>);
++      const ctx = await mw(c as unknown as Context);
+       (c as unknown as { set(key: string, value: unknown): void }).set("auth", ctx);
+       await next();
+     };
+     auths.set(name, wrapped);
+-    // Every registered auth is ALWAYS documented as protected: a route with
+-    // `{auth}` emits 401 + a `security` requirement. The optional `scheme`
+-    // only controls the lock-icon KIND; when omitted we publish a default
+-    // bearer scheme so the `security` requirement still resolves to a real
+-    // `components.securitySchemes` entry (no dangling ref, lock icon shows).
+     const resolvedScheme = scheme ?? { type: "http", scheme: "bearer" };
+     authSchemes.set(name, resolvedScheme);
+     app.registerSecurityScheme(name, resolvedScheme);
+   }
+ 
++  function auth(name: string, mw: (c: Context<E>) => Promise<Auth> | Auth, scheme?: AuthScheme) {
++    registerAuth(name, mw, scheme);
++  }
++
++  // --- Built-in auth strategies (session / jwt / oauth) ---
++
++  function registerSessionStrategy(name: string, opts: SessionStrategyOptions): SessionStrategy {
++    const handle = buildSessionStrategy(name, opts);
++    registerAuth(name, handle.middleware, handle.scheme);
++    return handle;
++  }
++
++  function registerJwtStrategy(name: string, opts: JwtStrategyOptions): JwtStrategy {
++    const handle = buildJwtStrategy(name, opts);
++    registerAuth(name, handle.middleware, handle.scheme);
++    return handle;
++  }
++
++  function registerOAuthStrategy(name: string, opts: OAuthStrategyOptions): OAuthStrategy {
++    const handle = buildOAuthStrategy(name, opts);
++    // OAuth is a *flow*, not a request guard: document the scheme and mount the
++    // /start + /callback routes. Protect downstream routes with a jwt/session gate.
++    app.registerSecurityScheme(name, handle.scheme);
++    handle.mount(app as unknown as FlowApp);
++    return handle;
++  }
++
++  function registerAuthStrategy<S extends AuthStrategySpec>(name: string, spec: S): StrategyFor<S> {
++    const handle = buildAuthStrategy(name, spec);
++    if ("middleware" in handle && handle.middleware) {
++      registerAuth(name, handle.middleware, handle.scheme);
++    } else {
++      app.registerSecurityScheme(name, handle.scheme);
++    }
++    if ("mount" in handle && handle.mount) handle.mount(app as unknown as FlowApp);
++    return handle;
++  }
++
++  const authWithStrategies = auth as typeof auth & {
++    strategy<Spec extends AuthStrategySpec>(name: string, spec: Spec): StrategyFor<Spec>;
++    session(name: string, opts: SessionStrategyOptions): SessionStrategy;
++    jwt(name: string, opts: JwtStrategyOptions): JwtStrategy;
++    oauth(name: string, opts: OAuthStrategyOptions): OAuthStrategy;
++  };
++  authWithStrategies.strategy = registerAuthStrategy;
++  authWithStrategies.session = registerSessionStrategy;
++  authWithStrategies.jwt = registerJwtStrategy;
++  authWithStrategies.oauth = registerOAuthStrategy;
++
+   // Overload 1: no auth → req has no `auth` field
+   function api<
+     P extends string,
+@@ -398,5 +477,5 @@ export function createApi<Auth = undefined, E extends Env = Env>(
+     app.get(resolvedUiPath, apiReference({ spec: { url: specPath } }));
+   }
+ 
+-  return { app, api: apiWithHelpers, auth, docs };
++  return { app, api: apiWithHelpers, auth: authWithStrategies, docs };
+ }
+diff --git a/src/auth.selfcheck.ts b/src/auth.selfcheck.ts
+new file mode 100644
+index 0000000..3a1899e
+--- /dev/null
++++ b/src/auth.selfcheck.ts
+@@ -0,0 +1,510 @@
++/**
++ * Self-check for the built-in auth strategies.
++ *
++ * Covers:
++ *   1. Session — create / cookie set / lookup via guard / destroy / logout
++ *   2. JWT — issue access+refresh, verify access, rotate refresh, reuse-revoke
++ *   3. OAuth (Google) — mount `/start` redirect + `/callback` code exchange
++ *      against mocked token/userinfo endpoints, with PKCE state/code_verifier
++ *   4. OpenAPI scheme emission — apiKey/in:cookie (session), bearer (jwt),
++ *      oauth2/authorizationCode (google)
++ *   5. Strategy coexistence — one app mixing session, jwt, oauth + a public route
++ *
++ * ponytail: no test framework — runnable self-check with asserts, matching
++ * src/openapi.selfcheck.ts and the example selfchecks. Cookie handling uses the
++ * real Set-Cookie/request-Cookie round-trip (no server boot needed).
++ */
++
++import { type } from "arktype";
++import { createApi } from "./api.js";
++
++let passed = 0;
++let failed = 0;
++
++async function check(name: string, fn: () => Promise<void>) {
++  try {
++    await fn();
++    passed++;
++    console.log(`  ✅ ${name}`);
++  } catch (e: any) {
++    failed++;
++    console.log(`  ❌ ${name}: ${e.message}`);
++  }
++}
++
++function assert(cond: boolean, label: string): void {
++  if (!cond) throw new Error(label);
++}
++
++/** Extract `name=value` from a Set-Cookie response header. */
++function cookieValue(res: Response): string {
++  const sc = res.headers.get("set-cookie");
++  if (!sc) return "";
++  const first = sc.split(";")[0]!;
++  return first;
++}
++
++// ─────────────────────────────────────────────────────────────────────────────
++// 1. Session strategy
++// ─────────────────────────────────────────────────────────────────────────────
++
++async function sessionFlow(): Promise<void> {
++  const { api, auth, docs, app } = createApi<{ userId: string }>({ title: "session" });
++
++  const session = auth.session("session", {
++    secret: "session-secret-32-chars-long!!",
++    csrf: false,
++  });
++
++  api.post("/login", { body: type({ userId: "string" }) }, async ({ body, c }) => {
++    await session.create(c, { userId: body.userId });
++    return { ok: true };
++  });
++  api.get("/me", { auth: "session" }, async ({ auth }) => ({ userId: auth.userId }));
++  api.post("/logout", { auth: "session", status: 204 }, async ({ c }) => {
++    await session.destroy(c);
++    return null;
++  });
++  docs();
++
++  // Login → sets a session cookie
++  let cookie = "";
++  {
++    const res = await app.request("/login", {
++      method: "POST",
++      headers: { "content-type": "application/json" },
++      body: JSON.stringify({ userId: "alice" }),
++    });
++    assert(res.status === 200, "login status 200");
++    const body: any = await res.json();
++    assert(body.ok === true, "login body ok");
++    cookie = cookieValue(res);
++    assert(cookie.startsWith("sid=") && cookie.length > "sid=".length, "login sets sid cookie");
++  }
++
++  // Guarded route with the session cookie → context flows
++  {
++    const res = await app.request("/me", { headers: { cookie: cookie } });
++    assert(res.status === 200, "me status 200");
++    const body: any = await res.json();
++    assert(body.userId === "alice", "me userId from session");
++  }
++
++  // Guarded route without cookie → 401
++  {
++    const res = await app.request("/me");
++    assert(res.status === 401, "me without cookie 401");
++  }
++
++  // Logout clears the session
++  {
++    const res = await app.request("/logout", { method: "POST", headers: { cookie: cookie } });
++    assert(res.status === 204, "logout status 204");
++    const cleared = cookieValue(res);
++    assert(cleared.startsWith("sid="), "logout clears cookie");
++    cookie = cleared; // now empty value
++  }
++
++  // Guarded route after logout → 401
++  {
++    const res = await app.request("/me", { headers: { cookie: cookie } });
++    assert(res.status === 401, "me after logout 401");
++  }
++}
++
++// ─────────────────────────────────────────────────────────────────────────────
++// 2. JWT strategy (access + rotation + reuse revocation)
++// ─────────────────────────────────────────────────────────────────────────────
++
++async function jwtFlow(): Promise<void> {
++  const { api, auth, docs, app } = createApi<{ sub: string }>({ title: "jwt" });
++
++  const jwt = auth.jwt("jwt", {
++    secret: "jwt-secret-32-chars-long!!",
++    issuer: "peta-hono",
++    audience: "test",
++    accessTtl: 900,
++    refreshTtl: 3600,
++  });
++
++  api.post("/login", { body: type({ sub: "string" }) }, async ({ body }) => jwt.issue(body.sub));
++  api.post("/refresh", { body: type({ refreshToken: "string" }) }, async ({ body }) =>
++    jwt.refresh(body.refreshToken),
++  );
++  api.get("/me", { auth: "jwt" }, async ({ auth }) => ({ sub: auth.sub }));
++  docs();
++
++  const r1 = await app.request("/login", {
++    method: "POST",
++    headers: { "content-type": "application/json" },
++    body: JSON.stringify({ sub: "user-1" }),
++  });
++  assert(r1.status === 200, "jwt login status 200");
++  const t1: any = await r1.json();
++  assert(
++    typeof t1.accessToken === "string" && t1.accessToken.split(".").length === 3,
++    "access token is JWS",
++  );
++  assert(typeof t1.refreshToken === "string", "refresh token issued");
++  assert(typeof t1.expiresIn === "number", "expiresIn numeric");
++
++  // Access token works on the guarded route
++  {
++    const res = await app.request("/me", {
++      headers: { authorization: `Bearer ${t1.accessToken}` },
++    });
++    assert(res.status === 200, "me with access token 200");
++    const body: any = await res.json();
++    assert(body.sub === "user-1", "me sub from JWT");
++  }
++
++  // Guarded route rejects a bad token
++  {
++    const res = await app.request("/me", { headers: { authorization: "Bearer not.a.jwt" } });
++    assert(res.status === 401, "me bad token 401");
++  }
++
++  // Refresh → rotation (new access + new refresh, old becomes single-use)
++  const r2 = await app.request("/refresh", {
++    method: "POST",
++    headers: { "content-type": "application/json" },
++    body: JSON.stringify({ refreshToken: t1.refreshToken }),
++  });
++  assert(r2.status === 200, "refresh status 200");
++  const t2: any = await r2.json();
++  assert(t2.accessToken !== t1.accessToken, "rotated access token differs");
++  assert(
++    typeof t2.refreshToken === "string" && t2.refreshToken !== t1.refreshToken,
++    "rotated refresh token differs",
++  );
++
++  // New access token works
++  {
++    const res = await app.request("/me", {
++      headers: { authorization: `Bearer ${t2.accessToken}` },
++    });
++    assert(res.status === 200, "me with rotated access 200");
++  }
++
++  // Replaying the ORIGINAL (now rotated) refresh token ⇒ reuse detected ⇒ 401
++  const r3 = await app.request("/refresh", {
++    method: "POST",
++    headers: { "content-type": "application/json" },
++    body: JSON.stringify({ refreshToken: t1.refreshToken }),
++  });
++  assert(r3.status === 401, "reuse of rotated refresh token 401");
++
++  // The rotated token is now revoked too (family-wide revocation)
++  const r4 = await app.request("/refresh", {
++    method: "POST",
++    headers: { "content-type": "application/json" },
++    body: JSON.stringify({ refreshToken: t2.refreshToken }),
++  });
++  assert(r4.status === 401, "family revoked after reuse 401");
++}
++
++// ─────────────────────────────────────────────────────────────────────────────
++// 3. OAuth (Google) strategy — mocked endpoints + PKCE
++// ─────────────────────────────────────────────────────────────────────────────
++
++async function oauthFlow(): Promise<void> {
++  const { api, auth, docs, app } = createApi<Record<string, unknown>>({ title: "oauth" });
++
++  const tokenCalls: string[] = [];
++  const fetchFn: typeof fetch = async (input, init) => {
++    const url =
++      typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
++    if (url.includes("/token")) {
++      tokenCalls.push(String(typeof init?.body === "string" ? init.body : ""));
++      return new Response(
++        JSON.stringify({
++          access_token: "mock_access",
++          id_token: "mock_id",
++          expires_in: 3600,
++          scope: "openid email profile",
++          token_type: "Bearer",
++        }),
++        { status: 200, headers: { "content-type": "application/json" } },
++      );
++    }
++    if (url.includes("/userinfo")) {
++      return new Response(
++        JSON.stringify({
++          sub: "google-123",
++          email: "alice@example.com",
++          name: "Alice",
++          email_verified: true,
++        }),
++        { status: 200, headers: { "content-type": "application/json" } },
++      );
++    }
++    return new Response("not found", { status: 404 });
++  };
++
++  const google = auth.oauth("google", {
++    clientId: "test-client-id",
++    redirectUri: "http://localhost/auth/google/callback",
++    scopes: ["openid", "email", "profile"],
++    authorizationURL: "https://mock.example/auth",
++    tokenURL: "https://mock.example/token",
++    userInfoURL: "https://mock.example/userinfo",
++    usePKCE: true,
++    fetchFn,
++    onSuccess: ({ user }) =>
++      new Response(JSON.stringify({ email: user.email }), {
++        status: 200,
++        headers: { "content-type": "application/json" },
++      }),
++    onError: (err) =>
++      new Response(JSON.stringify({ error: err.message }), {
++        status: 400,
++        headers: { "content-type": "application/json" },
++      }),
++  });
++  void google;
++
++  api.get("/public", {}, async () => ({ ok: true }));
++  docs();
++
++  // Start → 302 redirect to the authorize URL, sets state cookie, PKCE challenge
++  const startRes = await app.request("/auth/google/start");
++  assert(startRes.status === 302, "oauth start 302");
++  const location = startRes.headers.get("location") ?? "";
++  assert(location.includes("client_id=test-client-id"), "start url has client_id");
++  assert(
++    location.includes("code_challenge=") && location.includes("code_challenge_method=S256"),
++    "start uses PKCE",
++  );
++  const url = new URL(location);
++  const state = url.searchParams.get("state") ?? "";
++  assert(state.length > 0, "start url has state");
++  const stateCookie = cookieValue(startRes);
++  assert(stateCookie.startsWith("oauth_state="), "start sets state cookie");
++
++  // Callback with a matching state + code → exchanges via mocked fetch, onSuccess runs
++  const cbRes = await app.request(
++    `/auth/google/callback?code=mock_code&state=${encodeURIComponent(state)}`,
++    { headers: { cookie: stateCookie } },
++  );
++  assert(cbRes.status === 200, "oauth callback 200");
++  const cbBody: any = await cbRes.json();
++  assert(cbBody.email === "alice@example.com", "oauth callback onSuccess user");
++  assert(tokenCalls.length === 1, "token endpoint hit once");
++  assert(tokenCalls[0]!.includes("code_verifier="), "token exchange sends PKCE code_verifier");
++
++  // State mismatch / missing cookie → 400 (not 200)
++  const badRes = await app.request("/auth/google/callback?code=mock_code&state=forged");
++  assert(badRes.status === 400, "oauth bad state 400");
++}
++
++// ─────────────────────────────────────────────────────────────────────────────
++// 4. OpenAPI scheme emission + strategy coexistence
++// ─────────────────────────────────────────────────────────────────────────────
++
++async function openApiSchemes(): Promise<void> {
++  const { api, auth, docs, app } = createApi<Record<string, unknown>>({
++    title: "all",
++    version: "1.0.0",
++  });
++
++  const sessionStore = auth.session("session", { secret: "session-secret-32-chars-long!!" });
++  const jwtStore = auth.jwt("jwt", { secret: "jwt-secret-32-chars-long!!" });
++  const googleStore = auth.oauth("google", {
++    clientId: "cid",
++    clientSecret: "csecret",
++    redirectUri: "http://localhost/auth/google/callback",
++    onSuccess: ({ user }) =>
++      new Response(JSON.stringify({ email: user.email }), {
++        status: 200,
++        headers: { "content-type": "application/json" },
++      }),
++  });
++  void sessionStore;
++  void jwtStore;
++  void googleStore;
++
++  api.get("/s", { auth: "session" }, async () => ({}));
++  api.get("/j", { auth: "jwt" }, async () => ({}));
++  api.get("/pub", {}, async () => ({}));
++  docs();
++
++  const res = await app.request("/openapi.json");
++  assert(res.status === 200, "spec status 200");
++  const spec: any = await res.json();
++
++  const schemes = spec.components?.securitySchemes ?? {};
++  assert(schemes.session?.type === "apiKey", "session scheme is apiKey");
++  assert(schemes.session?.in === "cookie", "session scheme in:cookie");
++  assert(schemes.jwt?.type === "http" && schemes.jwt?.scheme === "bearer", "jwt scheme bearer");
++  assert(schemes.google?.type === "oauth2", "oauth scheme is oauth2");
++  assert(
++    schemes.google?.flows?.authorizationCode?.authorizationUrl ===
++      "https://accounts.google.com/o/oauth2/v2/auth",
++    "oauth google authorize url",
++  );
++  const googleFlows = schemes.google?.flows?.authorizationCode ?? {};
++  assert(googleFlows.scopes && googleFlows.scopes.openid !== undefined, "oauth scopes present");
++  assert(googleFlows.tokenUrl === "https://oauth2.googleapis.com/token", "oauth token url");
++
++  // Protected routes carry 401 + a `security` requirement; public route does not.
++  const sOp = spec.paths?.["/s"]?.get;
++  const jOp = spec.paths?.["/j"]?.get;
++  const pubOp = spec.paths?.["/pub"]?.get;
++  assert(sOp?.responses?.["401"], "session route documents 401");
++  assert(
++    Array.isArray(sOp?.security) && sOp.security[0]?.session !== undefined,
++    "session route security",
++  );
++  assert(jOp?.responses?.["401"], "jwt route documents 401");
++  assert(Array.isArray(jOp?.security) && jOp.security[0]?.jwt !== undefined, "jwt route security");
++  assert(!pubOp?.security && !pubOp?.responses?.["401"], "public route has no security/401");
++}
++
++// ─────────────────────────────────────────────────────────────────────────────
++// 5. Strategy coexistence
++// ─────────────────────────────────────────────────────────────────────────────
++
++async function coexistence(): Promise<void> {
++  const { api, auth, docs, app } = createApi<Record<string, unknown>>({ title: "mix" });
++  const session = auth.session("session", { secret: "session-secret-32-chars-long!!" });
++  const jwt = auth.jwt("jwt", { secret: "jwt-secret-32-chars-long!!" });
++
++  api.get("/public", {}, async () => ({ kind: "public" }));
++  api.get("/session-only", { auth: "session" }, async () => ({ kind: "session" }));
++  api.get("/jwt-only", { auth: "jwt" }, async () => ({ kind: "jwt" }));
++  api.post("/login", { body: type({ userId: "string" }) }, async ({ body, c }) => {
++    await session.create(c, { userId: body.userId });
++    return { ok: true };
++  });
++  api.post("/token", {}, async () => jwt.issue("user-1"));
++  docs();
++
++  let cookie = "";
++  {
++    const res = await app.request("/login", {
++      method: "POST",
++      headers: { "content-type": "application/json" },
++      body: JSON.stringify({ userId: "alice" }),
++    });
++    assert(res.status === 200, "coexist login 200");
++    cookie = cookieValue(res);
++  }
++  {
++    const res = await app.request("/session-only", { headers: { cookie } });
++    assert(res.status === 200, "coexist session-only 200");
++  }
++  {
++    const res = await app.request("/public");
++    assert(res.status === 200, "coexist public 200");
++  }
++  {
++    const tokenRes = await app.request("/token", { method: "POST" });
++    const t: any = await tokenRes.json();
++    const res = await app.request("/jwt-only", {
++      headers: { authorization: `Bearer ${t.accessToken}` },
++    });
++    assert(res.status === 200, "coexist jwt-only 200");
++  }
++  {
++    const res = await app.request("/session-only", { headers: { authorization: "Bearer x" } });
++    assert(res.status === 401, "coexist session rejects bearer (cookie required)");
++  }
++}
++
++// ─────────────────────────────────────────────────────────────────────────────
++// 6. CSRF (opt-in) — double-submit token enforced on mutating requests
++// ─────────────────────────────────────────────────────────────────────────────
++
++async function csrfFlow(): Promise<void> {
++  const { api, auth, docs, app } = createApi<Record<string, unknown>>({ title: "csrf" });
++  const session = auth.session("session", { secret: "csrf-secret-32-chars-long!!", csrf: true });
++
++  api.post("/login", { body: type({ userId: "string" }) }, async ({ body, c }) => {
++    await session.create(c, { userId: body.userId });
++    return { ok: true };
++  });
++  api.get("/csrf-token", {}, async ({ c }) => ({ csrfToken: await session.generateCsrf(c) }));
++  api.post("/update", { auth: "session" }, async ({ auth }) => ({ userId: auth.userId }));
++  docs();
++
++  const login = await app.request("/login", {
++    method: "POST",
++    headers: { "content-type": "application/json" },
++    body: JSON.stringify({ userId: "alice" }),
++  });
++  assert(login.status === 200, "csrf login 200");
++  const cookie = cookieValue(login);
++
++  // Fetch a CSRF token bound to the session (GET is not a mutating request).
++  const tok = await app.request("/csrf-token", { headers: { cookie } });
++  assert(tok.status === 200, "csrf token 200");
++  const { csrfToken } = (await tok.json()) as { csrfToken: string };
++  assert(typeof csrfToken === "string" && csrfToken.length > 0, "csrf token issued");
++
++  // Mutating route without the token → 403.
++  const noTok = await app.request("/update", { method: "POST", headers: { cookie } });
++  assert(noTok.status === 403, "csrf missing token 403");
++
++  // With the token → 200.
++  const withTok = await app.request("/update", {
++    method: "POST",
++    headers: { cookie, "x-csrf-token": csrfToken },
++  });
++  assert(withTok.status === 200, "csrf with token 200");
++
++  // Wrong token → 403.
++  const badTok = await app.request("/update", {
++    method: "POST",
++    headers: { cookie, "x-csrf-token": "not-the-token" },
++  });
++  assert(badTok.status === 403, "csrf wrong token 403");
++}
++
++// ─────────────────────────────────────────────────────────────────────────────
++// 7. auth.strategy(name, { type, ... }) unified dispatch
++// ─────────────────────────────────────────────────────────────────────────────
++
++async function strategyDispatch(): Promise<void> {
++  const { api, auth, docs, app } = createApi<Record<string, unknown>>({ title: "dispatch" });
++  const session = auth.strategy("s2", { type: "session", secret: "dispatch-secret-32-chars!!" });
++
++  api.post("/login", { body: type({ userId: "string" }) }, async ({ body, c }) => {
++    await session.create(c, { userId: body.userId });
++    return { ok: true };
++  });
++  api.get("/me", { auth: "s2" }, async ({ auth }) => ({ userId: auth.userId }));
++  docs();
++
++  const login = await app.request("/login", {
++    method: "POST",
++    headers: { "content-type": "application/json" },
++    body: JSON.stringify({ userId: "bob" }),
++  });
++  assert(login.status === 200, "dispatch login 200");
++  const cookie = cookieValue(login);
++
++  const me = await app.request("/me", { headers: { cookie } });
++  assert(me.status === 200, "dispatch me 200");
++  const { userId } = (await me.json()) as { userId: string };
++  assert(userId === "bob", "dispatch session context");
++
++  // The dispatch registers a real security scheme too.
++  const spec = (await (await app.request("/openapi.json")).json()) as any;
++  assert(spec.components?.securitySchemes?.s2?.in === "cookie", "dispatch scheme cookie");
++}
++
++console.log("=== Built-in auth strategy self-check ===");
++console.log();
++
++await check("Session create / lookup / logout", sessionFlow);
++await check("JWT issue / verify / rotate / reuse-revoke", jwtFlow);
++await check("OAuth (Google) start / callback with PKCE", oauthFlow);
++await check("OpenAPI securitySchemes emitted", openApiSchemes);
++await check("Strategies coexist in one app", coexistence);
++await check("CSRF (opt-in) enforced on mutating requests", csrfFlow);
++await check("auth.strategy unified dispatch", strategyDispatch);
++
++console.log();
++console.log(`Result: ${passed}/7 passed, ${failed} failed`);
++
++if (failed > 0) process.exit(1);
+diff --git a/src/auth/cookie.ts b/src/auth/cookie.ts
+new file mode 100644
+index 0000000..7ee1f3b
+--- /dev/null
++++ b/src/auth/cookie.ts
+@@ -0,0 +1,44 @@
++/** Minimal RFC-6265 cookie parsing / serialization — no dependency. */
++
++export interface CookieSerializeOptions {
++  maxAge?: number;
++  path?: string;
++  httpOnly?: boolean;
++  secure?: boolean;
++  sameSite?: "Lax" | "Strict" | "None";
++}
++
++/** Split a raw `Cookie` header into `{ name: value }`. */
++export function parseCookies(header: string | null | undefined): Record<string, string> {
++  const out: Record<string, string> = {};
++  if (!header) return out;
++  for (const part of header.split(";")) {
++    const eq = part.indexOf("=");
++    if (eq === -1) continue;
++    const name = part.slice(0, eq).trim();
++    let value = part.slice(eq + 1).trim();
++    if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
++    if (name) out[name] = decodeURIComponent(value);
++  }
++  return out;
++}
++
++/** Serialize a `Set-Cookie` value. */
++export function serializeCookie(
++  name: string,
++  value: string,
++  opts: CookieSerializeOptions = {},
++): string {
++  let s = `${name}=${encodeURIComponent(value)}`;
++  if (opts.maxAge !== undefined) s += `; Max-Age=${Math.floor(opts.maxAge)}`;
++  if (opts.path) s += `; Path=${opts.path}`;
++  if (opts.httpOnly) s += "; HttpOnly";
++  if (opts.secure) s += "; Secure";
++  if (opts.sameSite) s += `; SameSite=${opts.sameSite}`;
++  return s;
++}
++
++/** A cookie that has expired (used to clear a client stored cookie). */
++export function expiredCookie(name: string, opts: CookieSerializeOptions = {}): string {
++  return serializeCookie(name, "", { ...opts, maxAge: 0 });
++}
+diff --git a/src/auth/crypto.ts b/src/auth/crypto.ts
+new file mode 100644
+index 0000000..409fa09
+--- /dev/null
++++ b/src/auth/crypto.ts
+@@ -0,0 +1,108 @@
++/**
++ * Shared Web Crypto primitives for the built-in auth strategies.
++ *
++ * Portable across Node (>=18 Web Crypto), Bun, Deno, and Cloudflare Workers —
++ * depends only on `globalThis.crypto` / `TextEncoder` / `btoa` / `atob`, never
++ * on `node:crypto`. Mirrors the Web Crypto usage already present in
++ * `src/openapi.ts` (`sha1Hex`), keeping the library dependency-tree-light and
++ * runnable anywhere Hono runs.
++ *
++ * ponytail: no symmetric-key derivation / KDF sophistication here — the signing
++ * secret is used raw as an HMAC key. Ceiling: support `iron-webcrypto` or argon2
++ * for at-rest key handling, or an asymmetric (RS256/EdDSA) JWT scheme.
++ */
++
++const te = new TextEncoder();
++
++/** ASCII bytes → base64url (no padding). */
++export function base64urlEncode(bytes: Uint8Array): string {
++  let bin = "";
++  for (const b of bytes) bin += String.fromCharCode(b);
++  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
++}
++
++/** base64url string → bytes. */
++export function base64urlDecode(s: string): Uint8Array {
++  const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
++  const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4));
++  const bin = atob(b64 + pad);
++  const bytes = new Uint8Array(bin.length);
++  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
++  return bytes;
++}
++
++/** utf-8 string → base64url. */
++export function base64urlUtf8(data: string): string {
++  return base64urlEncode(te.encode(data));
++}
++
++/** base64url → utf-8 string. */
++export function utf8FromBase64url(s: string): string {
++  return new TextDecoder().decode(base64urlDecode(s));
++}
++
++async function hmacKey(secret: string): Promise<CryptoKey> {
++  // Normalize to an exact ArrayBuffer-backed view (TS 5.7 `Uint8Array` default
++  // generic is ArrayBufferLike, which `BufferSource` rejects).
++  const keyMaterial = te.encode(secret);
++  return crypto.subtle.importKey("raw", keyMaterial, { name: "HMAC", hash: "SHA-256" }, false, [
++    "sign",
++    "verify",
++  ]);
++}
++
++/** HMAC-SHA256 sign → base64url signature. */
++export async function hmacSign(secret: string, data: string): Promise<string> {
++  const key = await hmacKey(secret);
++  const sig = await crypto.subtle.sign("HMAC", key, te.encode(data));
++  return base64urlEncode(new Uint8Array(sig));
++}
++
++/** Constant-time HMAC-SHA256 verify against a base64url signature. */
++export async function hmacVerify(
++  secret: string,
++  data: string,
++  signature: string,
++): Promise<boolean> {
++  const key = await hmacKey(secret);
++  const expected = new Uint8Array(await crypto.subtle.sign("HMAC", key, te.encode(data)));
++  return timingSafeEqual(expected, decodeOrEmpty(signature));
++}
++
++/** Constant-time string/buffer comparison — prevents timing side-channels. */
++export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
++  if (a.length !== b.length) return false;
++  let diff = 0;
++  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
++  return diff === 0;
++}
++
++/** Cryptographically random base64url token (default 32 bytes ≈ 43 chars). */
++export function randomToken(bytes = 32): string {
++  const buf = new Uint8Array(bytes);
++  crypto.getRandomValues(buf);
++  return base64urlEncode(buf);
++}
++
++/** SHA-256 hex digest of utf-8 data. */
++export async function sha256Hex(data: string): Promise<string> {
++  const digest = await crypto.subtle.digest("SHA-256", te.encode(data));
++  return Array.from(new Uint8Array(digest))
++    .map((b) => b.toString(16).padStart(2, "0"))
++    .join("");
++}
++
++/** SHA-256 → base64url (used for PKCE S256 code-challenge derivation). */
++export async function sha256Base64url(data: string): Promise<string> {
++  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", te.encode(data)));
++  return base64urlEncode(digest);
++}
++
++/** Decode a base64url signature to bytes, returning empty array on malformed input. */
++function decodeOrEmpty(s: string): Uint8Array {
++  try {
++    return base64urlDecode(s);
++  } catch {
++    return new Uint8Array(0);
++  }
++}
+diff --git a/src/auth/index.ts b/src/auth/index.ts
+new file mode 100644
+index 0000000..7728a6f
+--- /dev/null
++++ b/src/auth/index.ts
+@@ -0,0 +1,70 @@
++/**
++ * Built-in auth strategies for `peta-hono`.
++ *
++ * Three strategy builders are provided — session, JWT (+ refresh rotation), and
++ * Google OAuth2 — each returning a handle that can be registered as an auth gate
++ * (`{ auth: name }`) and/or drives a login/refresh/OAuth flow. They compose with
++ * the existing `auth(name, mw, scheme?)` mechanism: a strategy's guard middleware
++ * is registered through the same code path, so a `{ auth: name }` route still
++ * emits a 401 + a `security` requirement + the matching `components.securitySchemes`
++ * entry.
++ */
++
++import { buildJwtStrategy, type JwtStrategy, type JwtStrategyOptions } from "./jwt.js";
++import { buildOAuthStrategy, type OAuthStrategy, type OAuthStrategyOptions } from "./oauth.js";
++import {
++  buildSessionStrategy,
++  type SessionStrategy,
++  type SessionStrategyOptions,
++} from "./session.js";
++
++export type { CookieSerializeOptions } from "./cookie.js";
++export type { IssuedTokens, JwtStrategy, JwtStrategyOptions } from "./jwt.js";
++export { buildJwtStrategy } from "./jwt.js";
++export type { FlowApp, OAuthStrategy, OAuthStrategyOptions, OAuthSuccessEvent } from "./oauth.js";
++export { buildOAuthStrategy } from "./oauth.js";
++export type { SessionStrategy, SessionStrategyOptions } from "./session.js";
++export { buildSessionStrategy } from "./session.js";
++export type { RefreshTokenRecord, RefreshTokenStore, SessionStore } from "./store.js";
++// Shared primitives (store adapters / crypto / cookie) are public so users can
++// back the strategies with a durable store and reuse the low-level helpers.
++export { createMemoryRefreshTokenStore, createMemorySessionStore } from "./store.js";
++
++// --- Unified `auth.strategy(name, spec)` dispatch ---
++
++/** Discriminated strategy spec for `auth.strategy(name, spec)`. */
++export type AuthStrategySpec =
++  | ({ type: "session" } & SessionStrategyOptions)
++  | ({ type: "jwt" } & JwtStrategyOptions)
++  | ({ type: "oauth" } & OAuthStrategyOptions);
++
++/** Map a `type` discriminator to its strategy handle. */
++export type StrategyFor<S extends AuthStrategySpec> = S extends { type: "session" }
++  ? SessionStrategy
++  : S extends { type: "jwt" }
++    ? JwtStrategy
++    : S extends { type: "oauth" }
++      ? OAuthStrategy
++      : never;
++
++/**
++ * Dispatch a discriminated strategy spec to the matching builder.
++ * Convenience for `auth.strategy(name, spec)`; the named builders
++ * (`auth.session/jwt/oauth`) call their own factory directly.
++ */
++export function buildAuthStrategy<S extends AuthStrategySpec>(
++  name: string,
++  spec: S,
++): StrategyFor<S> {
++  switch (spec.type) {
++    case "session":
++      return buildSessionStrategy(name, spec) as StrategyFor<S>;
++    case "jwt":
++      return buildJwtStrategy(name, spec) as StrategyFor<S>;
++    case "oauth":
++      return buildOAuthStrategy(name, spec) as StrategyFor<S>;
++    default:
++      // Exhaustive: spec.type is a closed 3-member union.
++      throw new Error(`Unknown auth strategy: ${(spec as { type: string }).type}`);
++  }
++}
+diff --git a/src/auth/jwt.ts b/src/auth/jwt.ts
+new file mode 100644
+index 0000000..cbd6fee
+--- /dev/null
++++ b/src/auth/jwt.ts
+@@ -0,0 +1,207 @@
++import type { Context } from "hono";
++import { APIError, type SecurityScheme } from "../openapi.js";
++import {
++  base64urlUtf8,
++  hmacSign,
++  hmacVerify,
++  randomToken,
++  sha256Hex,
++  utf8FromBase64url,
++} from "./crypto.js";
++import { createMemoryRefreshTokenStore, type RefreshTokenStore } from "./store.js";
++
++/**
++ * Built-in JWT access-token + refresh-token rotation strategy.
++ *
++ * Access tokens are HS256 JWTs signed with a shared secret; refresh tokens are
++ * opaque, server-stored (hashed), rotated on every refresh, and revocation is
++ * family-wide on reuse (a replayed rotated token revokes the whole family).
++ *
++ * ponytail: HS256 symmetric signing only — no asymmetric (RS256/EdDSA) key
++ * support or JWKS yet, and the refresh store is in-memory by default (supply a
++ * durable `store` for multi-replica deployments). A 32+ byte random secret is
++ * strongly recommended for `secret`.
++ */
++
++export interface JwtStrategyOptions {
++  /** HMAC signing secret (>= 32 random bytes recommended). Required. */
++  secret: string;
++  /** Access-token TTL in seconds (default 900 = 15 minutes). */
++  accessTtl?: number;
++  /** Refresh-token TTL in seconds (default 2592000 = 30 days). */
++  refreshTtl?: number;
++  /** Optional JWT `iss` claim — set and verify it if provided. */
++  issuer?: string;
++  /** Optional JWT `aud` claim — set and verify it if provided. */
++  audience?: string;
++  /** Refresh-token store (default in-memory). Supply a durable store in prod. */
++  store?: RefreshTokenStore;
++}
++
++export interface IssuedTokens {
++  accessToken: string;
++  refreshToken: string;
++  /** Access-token TTL in seconds. */
++  expiresIn: number;
++}
++
++export interface JwtStrategy {
++  /** The auth-gate name (used as `{ auth: name }`). */
++  name: string;
++  /** OpenAPI security scheme (bearer). */
++  scheme: SecurityScheme;
++  /** Guard middleware — verifies the bearer access token, yields `req.auth`. */
++  middleware: (c: Context) => Promise<Record<string, unknown>>;
++  /** Issue an access token + a fresh refresh token (usually at login). */
++  issue(sub: string, claims?: Record<string, unknown>): Promise<IssuedTokens>;
++  /** Rotate a refresh token → new access + refresh. Reuse revokes the family. */
++  refresh(refreshToken: string): Promise<IssuedTokens>;
++  /** Revoke a single refresh token. */
++  revoke(refreshToken: string): Promise<void>;
++  /** Verify an access token; returns the payload or `null`. */
++  verifyAccess(token: string): Promise<Record<string, unknown> | null>;
++}
++
++/** Sign a compact JWS (HS256). */
++async function signAccessToken(
++  secret: string,
++  claims: Record<string, unknown>,
++  ttlSeconds: number,
++  issuer: string | undefined,
++  audience: string | undefined,
++): Promise<string> {
++  const now = Math.floor(Date.now() / 1000);
++  // A unique `jti` makes each access token distinguishable (needed so a rotated
++  // token's claims differ even when issued in the same second as a prior one).
++  const payload: Record<string, unknown> = {
++    ...claims,
++    jti: randomToken(16),
++    iat: now,
++    exp: now + ttlSeconds,
++  };
++  if (issuer) payload.iss = issuer;
++  if (audience) payload.aud = audience;
++
++  const header = base64urlUtf8(JSON.stringify({ alg: "HS256", typ: "JWT" }));
++  const body = base64urlUtf8(JSON.stringify(payload));
++  const input = `${header}.${body}`;
++  const signature = await hmacSign(secret, input);
++  return `${input}.${signature}`;
++}
++
++/** Verify a compact JWS (HS256) and return its payload, or `null`. */
++async function verifyAccessToken(
++  token: string,
++  secret: string,
++  issuer: string | undefined,
++  audience: string | undefined,
++): Promise<Record<string, unknown> | null> {
++  const parts = token.split(".");
++  if (parts.length !== 3) return null;
++  const [header, body, sig] = parts as [string, string, string];
++  if (!(await hmacVerify(secret, `${header}.${body}`, sig))) return null;
++
++  let payload: Record<string, unknown>;
++  try {
++    const parsed = JSON.parse(utf8FromBase64url(body!));
++    if (!parsed || typeof parsed !== "object") return null;
++    payload = parsed as Record<string, unknown>;
++  } catch {
++    return null;
++  }
++
++  const exp = payload.exp;
++  if (typeof exp !== "number" || exp < Math.floor(Date.now() / 1000)) return null;
++  if (issuer && payload.iss !== issuer) return null;
++  if (audience && payload.aud !== audience) return null;
++  return payload;
++}
++
++/**
++ * Build a JWT strategy handle. The returned `middleware` is ready to be
++ * registered as an auth gate (`{ auth: name }`); the helpers drive login /
++ * refresh / logout flows.
++ */
++export function buildJwtStrategy(name: string, opts: JwtStrategyOptions): JwtStrategy {
++  const secret = opts.secret;
++  const accessTtl = opts.accessTtl ?? 900;
++  const refreshTtl = opts.refreshTtl ?? 2592000;
++  const issuer = opts.issuer;
++  const audience = opts.audience;
++  const store: RefreshTokenStore = opts.store ?? createMemoryRefreshTokenStore();
++
++  return {
++    name,
++    scheme: { type: "http", scheme: "bearer" },
++    async middleware(c: Context) {
++      const header = c.req.header("Authorization");
++      if (!header?.startsWith("Bearer ")) throw new APIError(401, "Unauthorized");
++      const token = header.slice(7).trim();
++      const payload = await verifyAccessToken(token, secret, issuer, audience);
++      if (!payload) throw new APIError(401, "Invalid or expired access token");
++      return payload;
++    },
++    async issue(sub, claims = {}) {
++      if (!sub) throw new APIError(400, "sub is required to issue a token");
++      const accessToken = await signAccessToken(
++        secret,
++        { sub, ...claims },
++        accessTtl,
++        issuer,
++        audience,
++      );
++      const refreshToken = randomToken(32);
++      const familyId = randomToken(16);
++      await store.save({
++        tokenHash: await sha256Hex(refreshToken),
++        sub,
++        familyId,
++        expiresAt: Date.now() + refreshTtl * 1000,
++        used: false,
++      });
++      return { accessToken, refreshToken, expiresIn: accessTtl };
++    },
++    async refresh(refreshToken) {
++      if (!refreshToken) throw new APIError(400, "Missing refresh token");
++      const tokenHash = await sha256Hex(refreshToken);
++      const record = await store.get(tokenHash);
++      if (!record) throw new APIError(401, "Invalid refresh token");
++      if (record.expiresAt < Date.now()) {
++        await store.delete(tokenHash);
++        throw new APIError(401, "Refresh token expired");
++      }
++      if (record.used) {
++        // Reuse of an already-rotated token ⇒ token-theft signal. Revoke the
++        // entire family and reject. 401 (not 403) keeps the reason opaque.
++        await store.deleteFamily(record.familyId);
++        throw new APIError(401, "Refresh token reuse detected");
++      }
++      // Rotate: mark this token single-use, issue a fresh one in the same family.
++      record.used = true;
++      await store.save(record);
++      const accessToken = await signAccessToken(
++        secret,
++        { sub: record.sub },
++        accessTtl,
++        issuer,
++        audience,
++      );
++      const newRefreshToken = randomToken(32);
++      await store.save({
++        tokenHash: await sha256Hex(newRefreshToken),
++        sub: record.sub,
++        familyId: record.familyId,
++        expiresAt: Date.now() + refreshTtl * 1000,
++        used: false,
++      });
++      return { accessToken, refreshToken: newRefreshToken, expiresIn: accessTtl };
++    },
++    async revoke(refreshToken) {
++      if (!refreshToken) return;
++      await store.delete(await sha256Hex(refreshToken));
++    },
++    async verifyAccess(token) {
++      return verifyAccessToken(token, secret, issuer, audience);
++    },
++  };
++}
+diff --git a/src/auth/oauth.ts b/src/auth/oauth.ts
+new file mode 100644
+index 0000000..79c5f51
+--- /dev/null
++++ b/src/auth/oauth.ts
+@@ -0,0 +1,293 @@
++import type { Context } from "hono";
++import { APIError, type SecurityScheme } from "../openapi.js";
++import { expiredCookie, parseCookies, serializeCookie } from "./cookie.js";
++import {
++  base64urlUtf8,
++  hmacSign,
++  hmacVerify,
++  randomToken,
++  sha256Base64url,
++  utf8FromBase64url,
++} from "./crypto.js";
++
++/**
++ * Built-in Google OAuth2 authorization-code strategy (+ optional PKCE).
++ *
++ * Registers two flow routes (default `{path}/start` and `{path}/callback`):
++ *  - `start` generates a `state` (CSRF) and, when PKCE is enabled, a
++ *    `code_verifier`, stores both in a short-lived signed HttpOnly cookie, and
++ *    redirects to Google's authorization endpoint.
++ *  - `callback` verifies the `state` against the signed cookie, exchanges the
++ *    `code` for tokens, fetches the user profile, then invokes the user's
++ *    `onSuccess` (which is where you issue a JWT / create a session).
++ *
++ * The strategy emits an OpenAPI `oauth2` security scheme for
++ * `components.securitySchemes`; it is a *flow*, not a request guard — protect
++ * downstream routes with a `jwt` or `session` strategy's `{ auth: name }`.
++ *
++ * PKCE is enabled by default when `clientSecret` is omitted (SPA / public
++ * clients). The `code_verifier` is never leaked: it travels only in the
++ * signed, HttpOnly, short-lived state cookie.
++ *
++ * ponytail: `onSuccess` is the only integration point (no automatic JWT/session
++ * issuance wired in). Token endpoint / userinfo are plain `fetch` calls —
++ * override `tokenURL`/`userInfoURL`/`fetchFn` for tests or a proxy.
++ */
++
++export interface OAuthStrategyOptions {
++  provider?: "google";
++  clientId: string;
++  /** Keep confidential — never expose in a browser bundle. */
++  clientSecret?: string;
++  redirectUri: string;
++  /** Defaults to `["openid", "email", "profile"]`. */
++  scopes?: string[];
++  authorizationURL?: string;
++  tokenURL?: string;
++  userInfoURL?: string;
++  /** Secret signing the state cookie. Defaults to `clientSecret` or ephemeral. */
++  stateSecret?: string;
++  stateCookieName?: string;
++  stateTtlSeconds?: number;
++  /** PKCE (default `true` when no `clientSecret`, else `false`). */
++  usePKCE?: boolean;
++  /** Base path for the flow routes (default `"/auth/google"`). */
++  path?: string;
++  /** Override `fetch` (tests / proxy). Defaults to `globalThis.fetch`. */
++  fetchFn?: typeof fetch;
++  /** Called on a successful callback. Return your response (issue JWT/session). */
++  onSuccess: (event: OAuthSuccessEvent) => Response | Promise<Response>;
++  /** Optional callback-error handler. Defaults to a JSON 400. */
++  onError?: (error: Error, c: Context) => Response | Promise<Response>;
++}
++
++export interface OAuthSuccessEvent {
++  /** Normalized provider user profile (Google: `sub`, `email`, `name`, ...). */
++  user: Record<string, unknown>;
++  /** Raw token response (`access_token`, `id_token`, `expires_in`, ...). */
++  tokens: Record<string, unknown>;
++  /** The raw request (useful for redirects / cookies). */
++  request: Request;
++  /** Hono context (useful to set cookies, call `jwt.issue`, etc.). */
++  c: Context;
++}
++
++export interface OAuthStrategy {
++  name: string;
++  /** OpenAPI `oauth2` security scheme (authorizationCode flow). */
++  scheme: SecurityScheme;
++  /** Build a provider authorization URL for a given state (+ PKCE challenge). */
++  authorizeUrl(state: string, codeChallenge?: string): string;
++  /** Exchange an authorization code for tokens. */
++  exchangeCode(code: string, codeVerifier?: string): Promise<Record<string, unknown>>;
++  /** Fetch the provider user profile for an access token. */
++  getUser(tokens: Record<string, unknown>): Promise<Record<string, unknown>>;
++  /** Register the `/start` + `/callback` flow routes on the app. */
++  mount(app: FlowApp): void;
++}
++
++/** Minimal app surface needed to mount the flow routes (avoids `OpenAPIHono` generic variance). */
++export interface FlowApp {
++  get(path: string, handler: (c: Context) => Response | Promise<Response>): unknown;
++  post(path: string, handler: (c: Context) => Response | Promise<Response>): unknown;
++}
++
++const GOOGLE_AUTHORIZE = "https://accounts.google.com/o/oauth2/v2/auth";
++const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
++const GOOGLE_USERINFO = "https://www.googleapis.com/oauth2/v3/userinfo";
++
++interface StatePayload {
++  state: string;
++  verifier?: string;
++}
++
++/**
++ * Build a Google OAuth strategy handle.
++ */
++export function buildOAuthStrategy(name: string, opts: OAuthStrategyOptions): OAuthStrategy {
++  const provider = opts.provider ?? "google";
++  const clientId = opts.clientId;
++  const clientSecret = opts.clientSecret;
++  const redirectUri = opts.redirectUri;
++  const scopes = opts.scopes ?? ["openid", "email", "profile"];
++  const authorizationURL = opts.authorizationURL ?? GOOGLE_AUTHORIZE;
++  const tokenURL = opts.tokenURL ?? GOOGLE_TOKEN;
++  const userInfoURL = opts.userInfoURL ?? GOOGLE_USERINFO;
++  const stateSecret = opts.stateSecret ?? clientSecret ?? randomToken(32);
++  const stateCookieName = opts.stateCookieName ?? "oauth_state";
++  const stateTtlSeconds = opts.stateTtlSeconds ?? 600;
++  const usePKCE = opts.usePKCE ?? !clientSecret;
++  const path = opts.path ?? `/auth/${provider}`;
++  const fetchFn = opts.fetchFn ?? globalThis.fetch;
++  const onSuccess = opts.onSuccess;
++  const onError = opts.onError;
++
++  const stateCookieOpts = {
++    maxAge: stateTtlSeconds,
++    path: "/",
++    httpOnly: true,
++    sameSite: "Lax" as const,
++  };
++
++  async function signStatePayload(payload: StatePayload): Promise<string> {
++    const data = base64urlUtf8(JSON.stringify(payload));
++    const sig = await hmacSign(stateSecret, data);
++    return `${data}.${sig}`;
++  }
++
++  async function readStatePayload(c: Context): Promise<StatePayload | null> {
++    const raw = parseCookies(c.req.header("Cookie"))[stateCookieName];
++    if (!raw) return null;
++    const dot = raw.lastIndexOf(".");
++    if (dot === -1) return null;
++    const data = raw.slice(0, dot);
++    const sig = raw.slice(dot + 1);
++    if (!(await hmacVerify(stateSecret, data, sig))) return null;
++    try {
++      const parsed = JSON.parse(utf8FromBase64url(data));
++      if (
++        parsed &&
++        typeof parsed === "object" &&
++        typeof (parsed as StatePayload).state === "string"
++      ) {
++        return parsed as StatePayload;
++      }
++      return null;
++    } catch {
++      return null;
++    }
++  }
++
++  function buildAuthorizeUrl(state: string, codeChallenge?: string): string {
++    const params = new URLSearchParams({
++      client_id: clientId,
++      redirect_uri: redirectUri,
++      response_type: "code",
++      scope: scopes.join(" "),
++      state,
++      access_type: "offline",
++    });
++    if (codeChallenge) {
++      params.set("code_challenge", codeChallenge);
++      params.set("code_challenge_method", "S256");
++    }
++    return `${authorizationURL}?${params.toString()}`;
++  }
++
++  const scheme: SecurityScheme = {
++    type: "oauth2",
++
++    flows: {
++      authorizationCode: {
++        authorizationUrl: authorizationURL,
++        tokenUrl: tokenURL,
++        scopes: Object.fromEntries(scopes.map((s) => [s, s])),
++      },
++    },
++  };
++
++  async function doExchangeCode(
++    code: string,
++    codeVerifier?: string,
++  ): Promise<Record<string, unknown>> {
++    const body = new URLSearchParams();
++    body.set("code", code);
++    body.set("client_id", clientId);
++    if (clientSecret) body.set("client_secret", clientSecret);
++    body.set("redirect_uri", redirectUri);
++    body.set("grant_type", "authorization_code");
++    if (codeVerifier) body.set("code_verifier", codeVerifier);
++    const res = await fetchFn(tokenURL, {
++      method: "POST",
++      headers: { "content-type": "application/x-www-form-urlencoded" },
++      body: body.toString(),
++    });
++    const json: Record<string, unknown> = await res.json().catch(() => ({}));
++    if (!res.ok || json.error) {
++      const msg =
++        typeof json.error_description === "string"
++          ? json.error_description
++          : "OAuth token exchange failed";
++      throw new APIError(400, msg);
++    }
++    return json;
++  }
++
++  async function doGetUser(tokens: Record<string, unknown>): Promise<Record<string, unknown>> {
++    const accessToken = tokens.access_token;
++    if (typeof accessToken !== "string") throw new APIError(400, "Missing access_token");
++    const res = await fetchFn(userInfoURL, {
++      headers: { authorization: `Bearer ${accessToken}` },
++    });
++    const json: Record<string, unknown> = await res.json().catch(() => ({}));
++    if (!res.ok) throw new APIError(400, "Failed to fetch user info");
++    return json;
++  }
++
++  return {
++    name,
++    scheme,
++    authorizeUrl(state, codeChallenge) {
++      return buildAuthorizeUrl(state, codeChallenge);
++    },
++    exchangeCode: doExchangeCode,
++    getUser: doGetUser,
++    mount(app) {
++      app.get(`${path}/start`, async (_c) => {
++        const state = randomToken(32);
++        const verifier = usePKCE ? randomToken(48) : undefined;
++        const challenge = verifier ? await sha256Base64url(verifier) : undefined;
++        const stateCookie = serializeCookie(
++          stateCookieName,
++          await signStatePayload({ state, verifier }),
++          stateCookieOpts,
++        );
++        // 302 to the provider with the state cookie attached to the returned
++        // Response (c.redirect() would otherwise drop a c.header() cookie).
++        return new Response(null, {
++          status: 302,
++          headers: { location: buildAuthorizeUrl(state, challenge), "set-cookie": stateCookie },
++        });
++      });
++
++      app.get(`${path}/callback`, async (c) => {
++        try {
++          const code = c.req.query("code");
++          const state = c.req.query("state");
++          const saved = await readStatePayload(c);
++          if (!code || !state || !saved || saved.state !== state) {
++            throw new APIError(400, "Invalid OAuth state");
++          }
++          const tokens = await doExchangeCode(code, saved.verifier);
++          const user = await doGetUser(tokens);
++          const event: OAuthSuccessEvent = {
++            user,
++            tokens,
++            request: c.req.raw,
++            c,
++          };
++          const result = await onSuccess(event);
++          attachClearStateCookie(result);
++          return result;
++        } catch (err) {
++          if (onError) {
++            const result = await onError(err instanceof Error ? err : new Error(String(err)), c);
++            attachClearStateCookie(result);
++            return result;
++          }
++          const e = err instanceof APIError ? err : new APIError(400, "OAuth flow failed");
++          const res = c.json({ error: e.message }, e.status);
++          attachClearStateCookie(res);
++          return res;
++        }
++      });
++    },
++  };
++
++  function attachClearStateCookie(res: Response): void {
++    res.headers.append(
++      "Set-Cookie",
++      expiredCookie(stateCookieName, { path: "/", httpOnly: true, sameSite: "Lax" }),
++    );
++  }
++}
+diff --git a/src/auth/session.ts b/src/auth/session.ts
+new file mode 100644
+index 0000000..2e18f84
+--- /dev/null
++++ b/src/auth/session.ts
+@@ -0,0 +1,167 @@
++import type { Context } from "hono";
++import { APIError, type SecurityScheme } from "../openapi.js";
++import { expiredCookie, parseCookies, serializeCookie } from "./cookie.js";
++import { hmacSign, hmacVerify, randomToken, timingSafeEqual } from "./crypto.js";
++import { createMemorySessionStore, type SessionStore } from "./store.js";
++
++/**
++ * Built-in cookie-session strategy.
++ *
++ * The session id travels in a signed cookie (`sid.signature`, HMAC-SHA256) and
++ * the session payload lives in a pluggable `SessionStore`. The guard middleware
++ * reads the cookie, verifies the signature, loads the session, and yields it as
++ * `req.auth`; invalid/expired/missing sessions throw 401.
++ *
++ * ponytail: signing (integrity) only, not encryption, and CSRF is opt-in via
++ * double-submit token (SameSite=Lax is the default mitigation). The cookie is
++ * NOT `Secure` by default (dev over http); set `secure: true` in production.
++ * Upgrade path: encrypt the cookie payload (iron) and/or add a true CSRF token
++ * that's bound to the session and origin.
++ */
++
++export interface SessionStrategyOptions {
++  /** HMAC secret for signing the session cookie. Required. */
++  secret: string;
++  /** Cookie name (default `"sid"`). */
++  cookieName?: string;
++  /** Session lifetime in seconds (default 604800 = 7 days). */
++  ttlSeconds?: number;
++  /** `HttpOnly` flag (default true). */
++  httpOnly?: boolean;
++  /** `SameSite` attribute (default `"Lax"`). */
++  sameSite?: "Lax" | "Strict" | "None";
++  /** `Secure` flag (default false — set true on https). */
++  secure?: boolean;
++  /** Cookie path (default `"/"`). */
++  path?: string;
++  /** Session store (default in-memory). Supply a durable store in prod. */
++  store?: SessionStore;
++  /** Enforce CSRF on mutating requests via a double-submit token (default false). */
++  csrf?: boolean;
++}
++
++export interface SessionStrategy {
++  /** The auth-gate name (used as `{ auth: name }`). */
++  name: string;
++  /** OpenAPI security scheme (apiKey/in:cookie). */
++  scheme: SecurityScheme;
++  /** Guard middleware — yields the session payload as `req.auth`. */
++  middleware: (c: Context) => Promise<Record<string, unknown>>;
++  /**
++   * Start a session (login/register): store payload + set cookie. Sets the cookie
++   * on the Hono context (for plain-object handlers) AND returns the `Set-Cookie`
++   * value, so a handler that returns a raw `Response` (e.g. an OAuth `onSuccess`)
++   * can attach it to its own response.
++   */
++  create(c: Context, data: Record<string, unknown>): Promise<string>;
++  /** Destroy the current session and clear the cookie. Returns the `Set-Cookie` value. */
++  destroy(c: Context): Promise<string>;
++  /** Read the current session payload (no throw), or `null`. */
++  get(c: Context): Promise<Record<string, unknown> | null>;
++  /** Generate (or return the existing) CSRF token bound to the session. */
++  generateCsrf(c: Context): Promise<string>;
++  /** Constant-time CSRF token check against the session. */
++  verifyCsrf(c: Context, token: string): Promise<boolean>;
++}
++
++const CSRF_FIELD = "_csrf";
++
++/**
++ * Build a session strategy handle.
++ */
++export function buildSessionStrategy(name: string, opts: SessionStrategyOptions): SessionStrategy {
++  const secret = opts.secret;
++  const cookieName = opts.cookieName ?? "sid";
++  const ttlSeconds = opts.ttlSeconds ?? 604800;
++  const httpOnly = opts.httpOnly ?? true;
++  const sameSite = opts.sameSite ?? "Lax";
++  const secure = opts.secure ?? false;
++  const path = opts.path ?? "/";
++  const csrf = opts.csrf ?? false;
++  const store: SessionStore = opts.store ?? createMemorySessionStore();
++
++  const cookieBase = { maxAge: ttlSeconds, path, httpOnly, secure, sameSite };
++
++  async function readSid(c: Context): Promise<string | null> {
++    const cookies = parseCookies(c.req.header("Cookie"));
++    const raw = cookies[cookieName];
++    if (!raw) return null;
++    const dot = raw.lastIndexOf(".");
++    if (dot === -1) return null;
++    const sid = raw.slice(0, dot);
++    const sig = raw.slice(dot + 1);
++    if (!(await hmacVerify(secret, sid, sig))) return null;
++    return sid;
++  }
++
++  async function getSession(c: Context): Promise<Record<string, unknown> | null> {
++    const sid = await readSid(c);
++    if (!sid) return null;
++    return store.get(sid);
++  }
++
++  async function verifyCsrfToken(c: Context, data: Record<string, unknown>): Promise<boolean> {
++    if (csrf === false) return true;
++    const expected = data[CSRF_FIELD];
++    if (typeof expected !== "string") return false;
++    const provided = c.req.header("x-csrf-token");
++    if (!provided) return false;
++    return timingSafeEqual(new TextEncoder().encode(expected), new TextEncoder().encode(provided));
++  }
++
++  return {
++    name,
++    scheme: { type: "apiKey", in: "cookie", name: cookieName },
++    async middleware(c) {
++      const sid = await readSid(c);
++      if (!sid) throw new APIError(401, "Unauthorized");
++      const data = await store.get(sid);
++      if (!data) throw new APIError(401, "Session expired");
++      if (isMutating(c.req.method) && !(await verifyCsrfToken(c, data))) {
++        throw new APIError(403, "CSRF token invalid");
++      }
++      return data;
++    },
++    async create(c, data) {
++      const sid = randomToken(32);
++      const signature = await hmacSign(secret, sid);
++      // When CSRF is enforced, seed a token so the session always has a `_csrf`
++      // to validate against. The client fetches it via generateCsrf()/a GET
++      // endpoint before a mutating request.
++      const sessionData = csrf ? { ...data, [CSRF_FIELD]: randomToken(24) } : { ...data };
++      await store.set(sid, sessionData, ttlSeconds);
++      const cookie = serializeCookie(cookieName, `${sid}.${signature}`, cookieBase);
++      c.header("Set-Cookie", cookie);
++      return cookie;
++    },
++    async destroy(c) {
++      const sid = await readSid(c);
++      if (sid) await store.delete(sid);
++      const cookie = expiredCookie(cookieName, { path, httpOnly, secure, sameSite });
++      c.header("Set-Cookie", cookie);
++      return cookie;
++    },
++    async get(c) {
++      return getSession(c);
++    },
++    async generateCsrf(c) {
++      const sid = await readSid(c);
++      if (!sid) throw new APIError(401, "No active session");
++      const data = (await store.get(sid)) ?? {};
++      const token = randomToken(24);
++      await store.set(sid, { ...data, [CSRF_FIELD]: token }, ttlSeconds);
++      return token;
++    },
++    async verifyCsrf(c, token) {
++      const data = await getSession(c);
++      if (!data) return false;
++      const expected = data[CSRF_FIELD];
++      if (typeof expected !== "string") return false;
++      return timingSafeEqual(new TextEncoder().encode(expected), new TextEncoder().encode(token));
++    },
++  };
++}
++
++function isMutating(method: string): boolean {
++  return method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
++}
+diff --git a/src/auth/store.ts b/src/auth/store.ts
+new file mode 100644
+index 0000000..4f1c198
+--- /dev/null
++++ b/src/auth/store.ts
+@@ -0,0 +1,95 @@
++/**
++ * Pluggable storage abstractions for the built-in auth strategies.
++ *
++ * The strategies accept any object implementing these interfaces, so users can
++ * back sessions/refresh tokens with a database, Redis, KV, etc. Two in-memory
++ * adapters are provided for development, tests, and single-replica deploys.
++ *
++ * ponytail: in-memory stores are process-local and lost on restart — a real
++ * deployment should supply a durable store (Postgres/Redis/KV). No TTL sweep
++ * runs in the background; expired records are lazily pruned on read.
++ */
++
++// --- Session store ---
++
++/** A session is an opaque record keyed by a session id. */
++export interface SessionStore {
++  /** Look up a session. Returns `null` when missing or expired. */
++  get(sid: string): Promise<Record<string, unknown> | null>;
++  /** Store a session. `ttlSeconds` (optional) sets an absolute expiry. */
++  set(sid: string, data: Record<string, unknown>, ttlSeconds?: number): Promise<void>;
++  /** Delete a session by id. */
++  delete(sid: string): Promise<void>;
++}
++
++/** In-memory session store — dev/tests/single-replica. */
++export function createMemorySessionStore(): SessionStore {
++  const sessions = new Map<string, { data: Record<string, unknown>; expiresAt: number | null }>();
++  return {
++    async get(sid) {
++      const s = sessions.get(sid);
++      if (!s) return null;
++      if (s.expiresAt !== null && s.expiresAt < Date.now()) {
++        sessions.delete(sid);
++        return null;
++      }
++      return { ...s.data };
++    },
++    async set(sid, data, ttlSeconds) {
++      const expiresAt = ttlSeconds ? Date.now() + ttlSeconds * 1000 : null;
++      sessions.set(sid, { data: { ...data }, expiresAt });
++    },
++    async delete(sid) {
++      sessions.delete(sid);
++    },
++  };
++}
++
++// --- Refresh token store ---
++
++/** A persisted refresh-token record. `used: true` marks a rotated (single-use) token. */
++export interface RefreshTokenRecord {
++  /** SHA-256 of the opaque token — the store never holds the raw token. */
++  tokenHash: string;
++  /** Subject (user id) the refresh token is bound to. */
++  sub: string;
++  /** Groups tokens issued together for reuse-detection (all revoked on reuse). */
++  familyId: string;
++  /** Absolute expiry in ms since epoch. */
++  expiresAt: number;
++  /** True once the token has been rotated (single-use); replay ⇒ reuse attack. */
++  used: boolean;
++}
++
++/** Storage for refresh tokens, keyed by token hash. */
++export interface RefreshTokenStore {
++  get(tokenHash: string): Promise<RefreshTokenRecord | null>;
++  save(record: RefreshTokenRecord): Promise<void>;
++  delete(tokenHash: string): Promise<void>;
++  /** All tokens in a family (for reuse-revocation). */
++  getFamily(familyId: string): Promise<RefreshTokenRecord[]>;
++  /** Revoke every token in a family. */
++  deleteFamily(familyId: string): Promise<void>;
++}
++
++/** In-memory refresh-token store — dev/tests/single-replica. */
++export function createMemoryRefreshTokenStore(): RefreshTokenStore {
++  const tokens = new Map<string, RefreshTokenRecord>();
++  return {
++    async get(tokenHash) {
++      return tokens.get(tokenHash) ?? null;
++    },
++    async save(record) {
++      tokens.set(record.tokenHash, { ...record });
++    },
++    async delete(tokenHash) {
++      tokens.delete(tokenHash);
++    },
++    async getFamily(familyId) {
++      return [...tokens.values()].filter((t) => t.familyId === familyId);
++    },
++    async deleteFamily(familyId) {
++      for (const t of [...tokens.values()]) if (t.familyId === familyId) tokens.delete(t.tokenHash);
++    },
++  };
++}
+diff --git a/src/index.ts b/src/index.ts
+index 7656c8b..b6894a5 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -1,8 +1,29 @@
+ // peta-hono public API barrel
+ 
+-export type { AuthScheme, HttpMethod, Method } from "./api.js";
++export type { AuthScheme, HttpMethod, Method, SecurityScheme } from "./api.js";
+ // --- High-level (primary API) ---
+ export { APIError, createApi, errors, fail, httpErrors } from "./api.js";
+-export type { ArkType, RouteConfig } from "./openapi.js";
++export type {
++  AuthStrategySpec,
++  CookieSerializeOptions,
++  FlowApp,
++  IssuedTokens,
++  JwtStrategy,
++  JwtStrategyOptions,
++  OAuthStrategy,
++  OAuthStrategyOptions,
++  OAuthSuccessEvent,
++  RefreshTokenRecord,
++  RefreshTokenStore,
++  SessionStore,
++  SessionStrategy,
++  SessionStrategyOptions,
++} from "./auth/index.js";
++// --- Built-in auth strategies (store adapters + strategy types) ---
++export {
++  createMemoryRefreshTokenStore,
++  createMemorySessionStore,
++} from "./auth/index.js";
++export type { ArkType, OAuth2Flows, RouteConfig } from "./openapi.js";
+ // --- Low-level (advanced use) ---
+ export { arktypeValidator, normalizeMethod, OpenAPIHono } from "./openapi.js";
+diff --git a/src/openapi.ts b/src/openapi.ts
+index e4c2855..bf122fc 100644
+--- a/src/openapi.ts
++++ b/src/openapi.ts
+@@ -25,10 +25,41 @@ export type ArkType = Type<any, any>;
+ 
+ // --- Auth scheme (for OpenAPI security scheme registration) ---
+ 
++/** OAuth2 authorization-code flow (Google, GitHub, ...). */
++export type OAuth2Flows = {
++  authorizationCode: {
++    authorizationUrl: string;
++    tokenUrl: string;
++    /** scope → human description. */
++    scopes: Record<string, string>;
++  };
++};
++
++/**
++ * The OpenAPI security scheme a caller passes to `auth(name, mw, scheme?)`.
++ * This is the stable, narrow input set (http bearer/basic, apiKey header/query)
++ * matching v0.5.4. It is intentionally narrower than what the library can
++ * *emit* — see `SecurityScheme`. Keeping this narrow means callers who construct
++ * a scheme to pass to `auth()` (and any exhaustive switch over this type) are
++ * unaffected by the built-in-strategy additions.
++ */
+ export type AuthScheme =
+   | { type: "http"; scheme: "bearer" | "basic" }
+   | { type: "apiKey"; in: "header" | "query"; name: string };
+ 
++/**
++ * The full set of OpenAPI security schemes the library can emit, including the
++ * cookie-based `apiKey` (`in: "cookie"`) and the `oauth2` variant that the
++ * built-in strategies contribute. This is the type of `components.securitySchemes`
++ * entries — use it when *reading* the emitted spec; use `AuthScheme` when
++ * *passing* a scheme to `auth()`. Widening this does not affect the `auth()`
++ * input contract.
++ */
++export type SecurityScheme =
++  | AuthScheme
++  | { type: "apiKey"; in: "cookie"; name: string }
++  | { type: "oauth2"; flows: OAuth2Flows };
++
+ // --- OpenAPI output types (minimal: only what we emit) ---
+ 
+ interface OpenAPIParameter {
+@@ -63,7 +94,7 @@ interface OpenAPIOperation {
+ 
+ interface OpenAPIComponents {
+   schemas?: Record<string, JsonSchema>;
+-  securitySchemes?: Record<string, AuthScheme>;
++  securitySchemes?: Record<string, SecurityScheme>;
+ }
+ 
+ interface OpenAPISpec {
+@@ -164,7 +195,7 @@ export class APIError extends Error {
+ 
+ interface ComponentRegistry {
+   schemas: Map<string, JsonSchema>;
+-  securitySchemes: Map<string, AuthScheme>;
++  securitySchemes: Map<string, SecurityScheme>;
+ }
+ 
+ // --- Helpers ---
+@@ -384,7 +415,7 @@ export class OpenAPIHono<
+   private _routes: StoredRoute[] = [];
+   private _components: ComponentRegistry = {
+     schemas: new Map<string, JsonSchema>(),
+-    securitySchemes: new Map<string, AuthScheme>(),
++    securitySchemes: new Map<string, SecurityScheme>(),
+   };
+ 
+   constructor(...args: ConstructorParameters<typeof Hono>) {
+@@ -495,7 +526,7 @@ export class OpenAPIHono<
+   }
+ 
+   /** Register an OpenAPI security scheme (e.g. bearer, apiKey). */
+-  registerSecurityScheme(name: string, scheme: AuthScheme): void {
++  registerSecurityScheme(name: string, scheme: SecurityScheme): void {
+     this._components.securitySchemes.set(name, scheme);
+   }
+ 
+diff --git a/src/typecheck.selfcheck.ts b/src/typecheck.selfcheck.ts
+index dc407da..7043fe7 100644
+--- a/src/typecheck.selfcheck.ts
++++ b/src/typecheck.selfcheck.ts
+@@ -16,7 +16,7 @@
+  * `createApi<Auth>`). Add `auth: "required"` to the config to fix it. README "How it works"
+  * documents this diagnostic so it is actionable without reading source.
+  */
+-import { createApi } from "./api.js";
++import { type AuthScheme, createApi, type SecurityScheme } from "./api.js";
+ 
+ // ── Positive: an authed app lets the handler read `auth` ──────────────
+ const authed = createApi<{ user: { id: string } }>({ title: "authed" });
+@@ -38,3 +38,25 @@ noAuth.api({ method: "GET", path: "/x", auth: "required" }, ({ auth }) => auth.u
+ 
+ // @ts-expect-error — shorthand api.get(): no `auth` field on a no-auth app
+ noAuth.api.get("/x", { auth: "required" }, ({ auth }) => auth.user.id);
++
++// ── ADR-012 / blast-radius Fix 1: input vs emitted security-scheme types ──
++// AuthScheme is the NARROW input passed to `auth(name, mw, scheme?)` (stable
++// since v0.5.4: http bearer/basic + apiKey header/query). SecurityScheme is the
++// WIDE emitted type (adds apiKey/in:cookie + oauth2). A wide scheme must NOT be
++// assignable to AuthScheme — that pins the auth() input contract so an
++// exhaustive switch over AuthScheme keeps compiling.
++const cookieScheme: SecurityScheme = { type: "apiKey", in: "cookie", name: "sid" };
++const oauth2Scheme: SecurityScheme = {
++  type: "oauth2",
++  flows: { authorizationCode: { authorizationUrl: "u", tokenUrl: "t", scopes: {} } },
++};
++
++// Bearer is a valid narrow AuthScheme input (unchanged from v0.5.4).
++const bearerInput: AuthScheme = { type: "http", scheme: "bearer" };
++// @ts-expect-error — cookie apiKey is wide, not a narrow AuthScheme input
++const badCookieInput: AuthScheme = cookieScheme;
++// @ts-expect-error — oauth2 is wide, not a narrow AuthScheme input
++const badOauthInput: AuthScheme = oauth2Scheme;
++void bearerInput;
++void badCookieInput;
++void badOauthInput;
