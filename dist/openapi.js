@@ -1,16 +1,21 @@
+// OpenAPIHono orchestrator — Hono dispatch + route storage + docs mounting.
+//
+// The five responsibilities of the original ~809-LOC file now live in focused
+// modules (ADR-011): errors.ts (kernel), paths.ts (grammar), validation.ts
+// (coercion + validator), registry.ts (schema hoisting/hashing) and spec.ts
+// (spec emission + route model types). This module only wires them together:
+// it stores StoredRoute[], owns the per-instance ComponentRegistry, and
+// delegates spec building to buildSpec. Public exports are re-exported here
+// for barrel stability — `import { OpenAPIHono } from "peta-hono"` is unchanged.
 import { type } from "arktype";
 import { Hono } from "hono";
 import { APIError, createErrorHandler } from "./errors.js";
-import { hasParamTokens, normalizeMethod, parseParamTokens, toOapiPath } from "./paths.js";
-import { getErrorSchemaRef, schemaToOA } from "./registry.js";
-import { arktypeValidator, isObjectSchema } from "./validation.js";
-// Validator re-export (ADR-011 step 3) — barrel stability for deep imports of
-// `arktypeValidator` via openapi.ts; the public barrel imports it from index.ts.
-export { arktypeValidator } from "./validation.js";
+import { normalizeMethod, parseParamTokens, toOapiPath } from "./paths.js";
+import { buildSpec, resolveSuccessCode, } from "./spec.js";
+import { arktypeValidator } from "./validation.js";
 // Path & method grammar lives in src/paths.ts — single source per ADR-010.
-// Re-export for barrel stability: consumers may import { Method, normalizeMethod } from "./openapi.js"
 export { hasParamTokens, normalizeMethod, PARAM_HAS_RE, PARAM_TOKEN_RE, parseParamTokens, SUPPORTED_METHODS, toOapiPath, } from "./paths.js";
-// --- OpenAPIHono ---
+export { arktypeValidator } from "./validation.js";
 export class OpenAPIHono extends Hono {
     _routes = [];
     _components = {
@@ -91,14 +96,9 @@ export class OpenAPIHono extends Hono {
             // If handler returned a Response directly, use it as-is
             if (result instanceof Response)
                 return result;
-            // Determine status: explicit status first, else the LOWEST declared
-            // 2xx/3xx, else 200. The "lowest" (not "first") matters because
-            // Object.keys() enumerates integer-like keys in ascending numeric order,
-            // so with {200, 201} declared the lowest wins regardless of source order.
-            // When more than one 2xx/3xx is declared, set `status` explicitly.
-            const successCode = config.status?.toString() ??
-                Object.keys(config.responses ?? {}).find((k) => k.startsWith("2") || k.startsWith("3")) ??
-                "200";
+            // Success status: shared policy with the spec emitter (spec.ts
+            // resolveSuccessCode) so runtime responses and documentation never drift.
+            const successCode = resolveSuccessCode(config.status, Object.keys(config.responses ?? {}));
             if (result === null) {
                 return c.body(null, Number(successCode));
             }
@@ -108,223 +108,12 @@ export class OpenAPIHono extends Hono {
     /** Emit an OpenAPI 3.0 JSON endpoint. */
     doc(url, config) {
         this.get(url, async (c) => {
-            return c.json(await this._buildSpec(config));
+            return c.json(await buildSpec(this._routes, this._components, config));
         });
     }
     /** Register an OpenAPI security scheme (e.g. bearer, apiKey). */
     registerSecurityScheme(name, scheme) {
         this._components.securitySchemes.set(name, scheme);
-    }
-    // --- Spec building ---
-    async _buildSpec(config) {
-        const paths = {};
-        const seenOperationIds = new Set();
-        const baseCounts = new Map();
-        for (const route of this._routes) {
-            const pathItem = paths[route.oapiPath] ?? {};
-            const baseId = route.config.operationId ??
-                `${route.method}_${route.oapiPath.replace(/[{}]/g, "").replace(/\//g, "_")}`;
-            let operationId = baseId;
-            if (seenOperationIds.has(operationId)) {
-                let n = (baseCounts.get(baseId) ?? 1) + 1;
-                while (seenOperationIds.has(`${baseId}_${n}`))
-                    n++;
-                operationId = `${baseId}_${n}`;
-                baseCounts.set(baseId, n);
-            }
-            else {
-                baseCounts.set(baseId, 1);
-            }
-            seenOperationIds.add(operationId);
-            const op = {
-                operationId,
-                responses: await this._buildResponses(route.config),
-            };
-            if (route.config.tags)
-                op.tags = route.config.tags;
-            if (route.config.summary)
-                op.summary = route.config.summary;
-            if (route.config.description)
-                op.description = route.config.description;
-            if (route.config.security)
-                op.security = route.config.security;
-            if (route.config.deprecated)
-                op.deprecated = true;
-            // Parameters (path + query + header)
-            const params = [];
-            if (route.config.request?.params) {
-                await this._addObjectParams(params, route.config.request.params, "path");
-            }
-            if (route.config.request?.query) {
-                await this._addObjectParams(params, route.config.request.query, "query");
-            }
-            if (route.config.request?.headers) {
-                await this._addObjectParams(params, route.config.request.headers, "header");
-            }
-            if (params.length > 0)
-                op.parameters = params;
-            // Request body
-            if (route.config.request?.body) {
-                op.requestBody = {
-                    required: true,
-                    content: {
-                        "application/json": {
-                            schema: await this._schemaToOA(route.config.request.body),
-                        },
-                    },
-                };
-            }
-            pathItem[route.method] = op;
-            paths[route.oapiPath] = pathItem;
-        }
-        const spec = {
-            openapi: config.openapi ?? "3.0.0",
-            info: config.info,
-            paths,
-            components: {},
-        };
-        // Register named security schemes
-        if (this._components.securitySchemes.size > 0) {
-            spec.components.securitySchemes = Object.fromEntries(this._components.securitySchemes);
-        }
-        // Register named schemas
-        if (this._components.schemas.size > 0) {
-            spec.components.schemas = Object.fromEntries(this._components.schemas);
-        }
-        return spec;
-    }
-    async _buildResponses(config) {
-        const responses = {};
-        // Standard OpenAPI descriptions for user-declared success codes
-        const descByCode = {
-            "200": "OK",
-            "201": "Created",
-            "202": "Accepted",
-            "204": "No Content",
-        };
-        if (config.responses) {
-            for (const [code, schema] of Object.entries(config.responses)) {
-                if (code === "204") {
-                    responses[code] = { description: "No Content" };
-                }
-                else {
-                    responses[code] = {
-                        description: descByCode[code] ?? `Response ${code}`,
-                        content: {
-                            "application/json": { schema: await this._schemaToOA(schema) },
-                        },
-                    };
-                }
-            }
-        }
-        // Determine success code: explicit status, else the LOWEST declared 2xx/3xx
-        // (JS enumerates integer-like keys in ascending order, so "first" in source
-        // order is meaningless), else 200. When multiple 2xx/3xx are declared, set
-        // `status` explicitly to get a non-lowest default.
-        const successCode = config.status?.toString() ??
-            Object.keys(responses).find((k) => k.startsWith("2") || k.startsWith("3")) ??
-            "200";
-        if (!responses[successCode]) {
-            responses[successCode] = {
-                description: descByCode[successCode] ?? "Success",
-            };
-        }
-        // Framework-guaranteed error responses (zero-config, share one schema component)
-        // 400 Bad Request — any endpoint with validated body/query/headers/params
-        //                 OR path has `:param` (auto-generated params schema via hasParamTokens).
-        //                 ponytail: auto-generated params means `GET /:id` documents 400 even
-        //                 without explicit body/query validation. The params are validated via
-        //                 arktypeValidator("param") (b6354f3), so it's intentional; benign
-        //                 false-positive if the param string never actually 400s. Guard
-        //                 `if (!responses["400"])` respects explicit `responses:{400: schema}`,
-        //                 which REPLACES the auto doc. Set `hide400: true` to suppress the
-        //                 auto 400 entirely (e.g. a pure `:param` route); a user-declared
-        //                 `responses:{400}` is still honored.
-        // 401 Unauthorized — any endpoint behind a registered auth scheme
-        const errorRef = await this._getErrorSchemaRef();
-        const addFrameworkError = async (code, description) => {
-            const key = String(code);
-            if (!responses[key]) {
-                responses[key] = {
-                    description,
-                    content: {
-                        "application/json": { schema: errorRef },
-                    },
-                };
-            }
-        };
-        if (!config.hide400 && !responses["400"]) {
-            const hasValidation = !!config.request?.body ||
-                !!config.request?.query ||
-                !!config.request?.headers ||
-                !!config.request?.params ||
-                hasParamTokens(config.path);
-            if (hasValidation) {
-                await addFrameworkError(400, "Bad Request");
-            }
-        }
-        if (config.security && !responses["401"]) {
-            await addFrameworkError(401, "Unauthorized");
-        }
-        // 404 Not Found — auto-inject when endpoint has path params (:id → resource lookup)
-        // ponytail: heuristic — path params strongly imply resource lookup. User can override
-        // by declaring an explicit 404 response, which the guard (`!responses["404"]`) respects.
-        // False positives (documenting 404 on endpoints that never throw it) are benign spec noise.
-        // Ceiling: heuristic covers ~95% of resource routes. Upgrade: add an explicit
-        // `documentNotFound` opt-in or `responses: {404: schema}` when false positives matter
-        // or 404 needs a custom schema.
-        if (!responses["404"] && hasParamTokens(config.path)) {
-            await addFrameworkError(404, "Not Found");
-        }
-        // Default 500 (if not already declared by the user)
-        if (!responses["500"]) {
-            responses["500"] = {
-                description: "Internal Server Error",
-                content: {
-                    "application/json": { schema: errorRef },
-                },
-            };
-        }
-        return responses;
-    }
-    // Framework-error schema ref is memoized per-instance registry in registry.ts
-    // (ADR-011 step 4).
-    async _getErrorSchemaRef() {
-        return getErrorSchemaRef(this._components);
-    }
-    /**
-     * Convert an ArkType schema → OpenAPI Schema Object (delegates to registry.ts,
-     * ADR-011 step 4): strips $schema, hoists $defs to components/schemas under
-     * content-hash stable names, rewrites all $ref pointers, module-scoped cache.
-     */
-    async _schemaToOA(schema) {
-        return schemaToOA(schema, this._components);
-    }
-    /** Walk an ArkType object schema and produce OpenAPI parameter objects. */
-    async _addObjectParams(params, schema, inLocation) {
-        // Use _schemaToOA (not raw toJsonSchema) so $defs are hoisted and refs rewritten
-        const json = await this._schemaToOA(schema);
-        if (!isObjectSchema(json) || !json.properties)
-            return;
-        const required = new Set(json.required ?? []);
-        for (const [name, prop] of Object.entries(json.properties)) {
-            if (!prop)
-                continue;
-            // ponytail: Hono's c.req.header() lowercases via Fetch Headers; spec
-            // emits lowercase header param names so runtime and docs match. Users
-            // should declare header schemas with lowercase keys.
-            const paramName = inLocation === "header" ? name.toLowerCase() : name;
-            const param = {
-                name: paramName,
-                in: inLocation,
-                required: required.has(name),
-                schema: prop,
-            };
-            const desc = prop.description;
-            if (desc)
-                param.description = desc;
-            params.push(param);
-        }
     }
 }
 //# sourceMappingURL=openapi.js.map

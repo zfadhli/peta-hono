@@ -10,7 +10,6 @@
 // registration state is never shared behind a module singleton.
 
 import { type JsonSchema, type } from "arktype";
-import type { SecurityScheme } from "./openapi.js";
 import type { ArkType } from "./validation.js";
 
 // --- Web Crypto helpers ---
@@ -24,12 +23,18 @@ export async function sha1Hex(data: string): Promise<string> {
   return hex.slice(0, 12);
 }
 
-// --- Component registry ---
+// --- Component registry (schemas side) ---
 
-/** Per-instance component maps: schemas hoisted from $defs + registered security schemes. */
-export interface ComponentRegistry {
+/**
+ * The schemas half of the per-instance component registry. The full aggregate
+ * (schemas + securitySchemes) is spec.ts's `ComponentRegistry`; registry.ts
+ * only ever reads/writes `schemas`, so a structural contract keeps this module
+ * independent of the security-scheme type and the openapi.ts orchestrator.
+ * The registry object is owned by the caller and passed in explicitly, so
+ * registration state is never shared behind a module singleton.
+ */
+export interface SchemaHost {
   schemas: Map<string, JsonSchema>;
-  securitySchemes: Map<string, SecurityScheme>;
 }
 
 /**
@@ -83,10 +88,7 @@ export function rewriteRefs(node: unknown, rename: Map<string, string>): void {
  * WeakMap keyed by Type identity. On a cache hit the hoisted defs are re-registered
  * into the passed instance map so THIS instance's components resolve every ref.
  */
-export async function schemaToOA(
-  schema: ArkType,
-  components: ComponentRegistry,
-): Promise<JsonSchema> {
+export async function schemaToOA(schema: ArkType, components: SchemaHost): Promise<JsonSchema> {
   const cached = schemaCache.get(schema);
   if (cached) {
     for (const [stableName, def] of cached.defs) {
@@ -154,7 +156,7 @@ export async function schemaToOA(
  * content hash, which is deterministic, so every instance publishes the same
  * `schema_<hash>` entry and refs never dangle.
  */
-export async function getErrorSchemaRef(components: ComponentRegistry): Promise<JsonSchema> {
+export async function getErrorSchemaRef(components: SchemaHost): Promise<JsonSchema> {
   const cached = errorSchemaRefCache.get(components);
   if (cached) return cached;
   const errorSchema = type({ error: "string" });
@@ -173,4 +175,4 @@ export async function getErrorSchemaRef(components: ComponentRegistry): Promise<
 }
 
 /** Per-instance memo of the framework-error schema ref (see getErrorSchemaRef). */
-const errorSchemaRefCache = new WeakMap<ComponentRegistry, JsonSchema>();
+const errorSchemaRefCache = new WeakMap<SchemaHost, JsonSchema>();

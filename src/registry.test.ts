@@ -3,13 +3,8 @@
 // module-scoped schema cache, and the per-instance framework-error ref memo.
 import { scope } from "arktype";
 import { describe, expect, it } from "vitest";
-import {
-  type ComponentRegistry,
-  getErrorSchemaRef,
-  rewriteRefs,
-  schemaToOA,
-  sha1Hex,
-} from "./registry.js";
+import { getErrorSchemaRef, rewriteRefs, schemaToOA, sha1Hex } from "./registry.js";
+import type { ComponentRegistry } from "./spec.js";
 
 const STABLE_NAME_RE = /^schema_[a-f0-9]{12}$/;
 

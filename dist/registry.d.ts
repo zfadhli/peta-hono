@@ -1,12 +1,17 @@
 import { type JsonSchema } from "arktype";
-import type { SecurityScheme } from "./openapi.js";
 import type { ArkType } from "./validation.js";
 /** SHA-1 hex digest (first 12 chars) using Web Crypto API — no Node dependency. */
 export declare function sha1Hex(data: string): Promise<string>;
-/** Per-instance component maps: schemas hoisted from $defs + registered security schemes. */
-export interface ComponentRegistry {
+/**
+ * The schemas half of the per-instance component registry. The full aggregate
+ * (schemas + securitySchemes) is spec.ts's `ComponentRegistry`; registry.ts
+ * only ever reads/writes `schemas`, so a structural contract keeps this module
+ * independent of the security-scheme type and the openapi.ts orchestrator.
+ * The registry object is owned by the caller and passed in explicitly, so
+ * registration state is never shared behind a module singleton.
+ */
+export interface SchemaHost {
     schemas: Map<string, JsonSchema>;
-    securitySchemes: Map<string, SecurityScheme>;
 }
 /**
  * Recursively rewrite all $ref: "#/$defs/X" → "#/components/schemas/<stableName>" in-place.
@@ -22,7 +27,7 @@ export declare function rewriteRefs(node: unknown, rename: Map<string, string>):
  * WeakMap keyed by Type identity. On a cache hit the hoisted defs are re-registered
  * into the passed instance map so THIS instance's components resolve every ref.
  */
-export declare function schemaToOA(schema: ArkType, components: ComponentRegistry): Promise<JsonSchema>;
+export declare function schemaToOA(schema: ArkType, components: SchemaHost): Promise<JsonSchema>;
 /**
  * The shared framework-error schema `{ error: string }` as a $ref into
  * `components.schemas`, registering the def into the passed instance map.
@@ -32,5 +37,5 @@ export declare function schemaToOA(schema: ArkType, components: ComponentRegistr
  * content hash, which is deterministic, so every instance publishes the same
  * `schema_<hash>` entry and refs never dangle.
  */
-export declare function getErrorSchemaRef(components: ComponentRegistry): Promise<JsonSchema>;
+export declare function getErrorSchemaRef(components: SchemaHost): Promise<JsonSchema>;
 //# sourceMappingURL=registry.d.ts.map
