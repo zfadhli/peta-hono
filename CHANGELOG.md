@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-09-02
+
+### Added
+
+- **`resolve` route field — typed resource injection (ADR-015)** — a new optional `resolve: { key: (input) => resource }` config block that runs AFTER `param`/`body`/`query`/`header` validation AND after auth middleware, before the handler. Its return value is type-inferred onto the handler (destructured beside `body`/`query`/`auth`); a thrown `fail.notFound`/`fail.forbidden` flows through the single `onError` chokepoint. Runtime-only — it emits **zero** OpenAPI spec drift (no new request/response schema). A resolver collapses the duplicated `db.select(...).where(...)` + `if (!rows[0]) throw notFound` + ownership check blocks that repeated across load-and-guard routes into one place.
+- **`RouteResolver` public type** — re-exported from the barrel (`import type { RouteResolver } from "peta-hono"`); the loose runtime shape (`(input: In) => unknown`). Strict typing lives on `api()`'s overload intersection (a homomorphic per-key `ResolverFn<In>` map, contravariant — no bivariance hack), deliberately kept OFF `RouteFields` (mirrors how `auth` is kept off `RouteFields` to avoid the documented `ReturnType` overload-collapse bug). Resolver params are not contextually typed for inline arrows under strict mode — the guaranteed contract is hoisted + explicitly annotated resolvers (as the example uses them).
+- **Blog example `POST /register`** — a register route in `examples/blog/auth.ts`: validates `email: "string"` + `password: "string >= 8"`, hashes the password via `peta-hono/password` (never stores plaintext), rejects a duplicate email with `fail.conflict` (409), and returns `201 { id, email }` (never the password hash). Adds register tests (success / duplicate-conflict / weak-password-400 / login-with-registered-user) and the `/register` OpenAPI spec snapshot path.
+
+### Changed
+
+- **Blog example uses `resolve` for resource + ownership guards** — `examples/blog/posts.ts` routes the PUT/DELETE post load+ownership through an `ownedPost` resolver (404 on missing, 403 on wrong author); `examples/blog/comments.ts` routes the GET/POST comment parent-post existence through `existingPost`. The per-route duplicated lookup + guard blocks collapse into the resolver. `resolve` is used only for load+guard patterns — queries stay inline (no named query-wrapper functions). The blog example gains a JWT auth flow (`examples/blog/auth.ts`): `/login`, `/refresh`, `/logout`, `/me`, `/health`.
+
+### Notes
+
+- **No public API breakage** — `resolve` is additive (an optional new `RouteConfig` field); existing route configs and handlers are unchanged. `dist/` is rebuilt to match. Full suite: 11 files / 108 tests, `Type Errors: no errors`.
+
 ## [0.6.4] - 2026-09-02
 
 ### Changed
