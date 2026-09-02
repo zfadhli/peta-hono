@@ -22,7 +22,4 @@ jobs:
       # produce no diff. npm publish also runs prepublishOnly (same gate), but
       # surfacing it here gives a clear failure point before the registry call.
       - run: nub run check:dist
-      - run: echo "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > .npmrc
       - run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
