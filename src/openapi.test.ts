@@ -115,6 +115,10 @@ describe("OpenAPIHono", () => {
     expect(limitParam).toBeTruthy();
     expect(limitParam?.schema?.minimum).toBe(1);
     expect(limitParam?.schema?.maximum).toBe(100);
+
+    // Issue #21: 400 is auto-documented on a validated-query route too.
+    expect(getSearch?.responses?.["400"]).toBeTruthy();
+    expect(getSearch?.responses?.["400"]?.description).toBe("Bad Request");
   });
 
   // ── Assertion 2: Coercion ─────────────────────────────────────────
@@ -320,6 +324,21 @@ describe("OpenAPIHono", () => {
     expect(pubOp).toBeTruthy();
     expect(pubOp?.responses?.["401"]).toBeFalsy();
     expect(pubOp?.security).toBeFalsy();
+
+    // Issue #21: a route with no validation and no `:param` documents neither
+    // 400 nor 404 (500 is always present).
+    expect(pubOp?.responses?.["400"]).toBeFalsy();
+    expect(pubOp?.responses?.["404"]).toBeFalsy();
+    expect(pubOp?.responses?.["500"]).toBeTruthy();
+
+    // Issue #21: the four framework errors share ONE deduped {error:string}
+    // component (stable schema_<12hex>), not one schema per code.
+    const errRefs = ["400", "401", "404", "500"].map(
+      (code) => op?.responses?.[code]?.content?.["application/json"]?.schema?.$ref,
+    );
+    for (const ref of errRefs) expect(ref).toBe(errRefs[0]);
+    expect(errRefs[0]?.startsWith("#/components/schemas/schema_")).toBe(true);
+    expect(Object.keys(spec.components?.schemas ?? {})).toEqual([errRefs[0]?.split("/").pop()]);
   });
 
   // ── Assertion 9: unmatched-route 404 routes through the JSON error policy ──
